@@ -1,0 +1,25 @@
+name: static
+version: "1.0"
+description: Static HTML site served by Nginx
+
+parameters: {}
+
+services:
+  app:
+    image: "nginx:alpine"
+    volumes:
+      - "${site_root}:/usr/share/nginx/html:ro"
+    ports:
+      - "80"
+
+healthcheck:
+  url: "http://localhost:80"
+  interval: 10s
+  timeout: 5s
+  retries: 3
+
+backup:
+  paths:
+    - "${site_root}"
+
+setup: []
