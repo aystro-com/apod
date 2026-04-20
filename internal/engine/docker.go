@@ -58,6 +58,7 @@ type ContainerConfig struct {
 	MemoryMB    int64
 	CPUs        float64
 	Command     string
+	Args        []string // raw args passed directly (not through sh -c)
 	Ports       map[string]string // container_port -> host_port
 }
 
@@ -73,8 +74,12 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		if len(parts) == 2 && parts[1] == "ro" {
 			readOnly = true
 		}
+		mountType := mount.TypeBind
+		if !strings.HasPrefix(host, "/") {
+			mountType = mount.TypeVolume
+		}
 		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
+			Type:     mountType,
 			Source:   host,
 			Target:   target,
 			ReadOnly: readOnly,
@@ -90,7 +95,9 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	}
 
 	var cmd []string
-	if cfg.Command != "" {
+	if len(cfg.Args) > 0 {
+		cmd = cfg.Args
+	} else if cfg.Command != "" {
 		cmd = []string{"sh", "-c", cfg.Command}
 	}
 

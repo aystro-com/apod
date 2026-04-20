@@ -74,7 +74,7 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 			"80":  "80",
 			"443": "443",
 		},
-		Command: strings.Join(cmd, " "),
+		Args: cmd,
 	})
 	if err != nil {
 		return fmt.Errorf("create traefik container: %w", err)
