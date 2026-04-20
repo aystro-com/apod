@@ -5,9 +5,8 @@
 .aider*
 .codeium/
 
-# Markdown files
-*.md
-
-# Superpowers plans/specs
-docs/superpowers/
+# Binary
 apod
+
+# Superpowers internal
+docs/superpowers/
