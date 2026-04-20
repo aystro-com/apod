@@ -5,7 +5,7 @@ import (
 )
 
 func TestTraefikLabels(t *testing.T) {
-	labels := TraefikLabels("example.com", []string{"example.com", "www.example.com"}, "80")
+	labels := TraefikLabels("example.com", []string{"example.com", "www.example.com"}, "80", "")
 
 	if labels["traefik.enable"] != "true" {
 		t.Error("expected traefik.enable to be true")
@@ -28,7 +28,7 @@ func TestTraefikLabels(t *testing.T) {
 }
 
 func TestTraefikLabelsSingleDomain(t *testing.T) {
-	labels := TraefikLabels("test.com", []string{"test.com"}, "8080")
+	labels := TraefikLabels("test.com", []string{"test.com"}, "8080", "")
 
 	routerKey := "traefik.http.routers.test-com.rule"
 	expected := "Host(`test.com`)"

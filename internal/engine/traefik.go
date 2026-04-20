@@ -91,7 +91,7 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 	return nil
 }
 
-func TraefikLabels(siteDomain string, domains []string, servicePort string) map[string]string {
+func TraefikLabels(siteDomain string, domains []string, servicePort string, backendScheme string) map[string]string {
 	routerName := strings.ReplaceAll(siteDomain, ".", "-")
 
 	var hostRules []string
@@ -100,7 +100,7 @@ func TraefikLabels(siteDomain string, domains []string, servicePort string) map[
 	}
 	rule := strings.Join(hostRules, " || ")
 
-	return map[string]string{
+	labels := map[string]string{
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.%s.rule", routerName):                      rule,
 		fmt.Sprintf("traefik.http.routers.%s.tls", routerName):                       "true",
@@ -109,4 +109,10 @@ func TraefikLabels(siteDomain string, domains []string, servicePort string) map[
 		labelPrefix + "site":    siteDomain,
 		labelPrefix + "managed": "true",
 	}
+
+	if backendScheme != "" {
+		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.scheme", routerName)] = backendScheme
+	}
+
+	return labels
 }

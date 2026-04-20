@@ -7,11 +7,12 @@ type DriverParam struct {
 }
 
 type DriverService struct {
-	Image       string            `yaml:"image"`
-	Volumes     []string          `yaml:"volumes,omitempty"`
-	Ports       []string          `yaml:"ports,omitempty"`
-	Environment map[string]string `yaml:"environment,omitempty"`
-	Command     string            `yaml:"command,omitempty"`
+	Image         string            `yaml:"image"`
+	Volumes       []string          `yaml:"volumes,omitempty"`
+	Ports         []string          `yaml:"ports,omitempty"`
+	Environment   map[string]string `yaml:"environment,omitempty"`
+	Command       string            `yaml:"command,omitempty"`
+	BackendScheme string            `yaml:"backend_scheme,omitempty"`
 }
 
 type DriverHealthcheck struct {

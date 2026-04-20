@@ -11,6 +11,7 @@ parameters:
 services:
   app:
     image: "jacobalberty/unifi:${unifi_version}"
+    backend_scheme: "https"
     volumes:
       - "${data_root}/unifi:/unifi"
     ports:

@@ -231,7 +231,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		}
 		if svcName == "app" && len(svc.Ports) > 0 {
 			port := svc.Ports[0]
-			traefikLabels := TraefikLabels(opts.Domain, []string{opts.Domain}, port)
+			traefikLabels := TraefikLabels(opts.Domain, []string{opts.Domain}, port, svc.BackendScheme)
 			for k, v := range traefikLabels {
 				labels[k] = v
 			}
