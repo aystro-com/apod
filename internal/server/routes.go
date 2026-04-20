@@ -394,3 +394,92 @@ func (h *Handler) RemoveStorageConfigHandler(w http.ResponseWriter, r *http.Requ
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
+
+func (h *Handler) DeployHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Branch string `json:"branch"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.Deploy(r.Context(), domain, req.Branch); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deployed"})
+}
+
+func (h *Handler) RollbackHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if err := h.engine.Rollback(r.Context(), domain); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "rolled_back"})
+}
+
+func (h *Handler) ListDeploymentsHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	deps, err := h.engine.ListDeployments(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, deps)
+}
+
+func (h *Handler) CreateWebhookHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	token, err := h.engine.CreateWebhook(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]string{"token": token, "url": "/webhook/" + token})
+}
+
+func (h *Handler) ListWebhooksHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	whs, err := h.engine.ListWebhooks(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, whs)
+}
+
+func (h *Handler) DeleteWebhookHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if err := h.engine.DeleteWebhook(r.Context(), domain); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) IncomingWebhookHandler(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	if err := h.engine.HandleWebhook(r.Context(), token); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deploying"})
+}
+
+func (h *Handler) SiteLogsHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	logs, err := h.engine.GetLogs(r.Context(), domain, 50)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, logs)
+}
+
+func (h *Handler) AllLogsHandler(w http.ResponseWriter, r *http.Request) {
+	logs, err := h.engine.GetAllLogs(r.Context(), 100)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, logs)
+}

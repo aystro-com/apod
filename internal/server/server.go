@@ -67,7 +67,23 @@ func New(e *engine.Engine) *Server {
 		r.Post("/storage", h.AddStorageConfigHandler)
 		r.Get("/storage", h.ListStorageConfigsHandler)
 		r.Delete("/storage/{name}", h.RemoveStorageConfigHandler)
+
+		// Deploy
+		r.Post("/sites/{domain}/deploy", h.DeployHandler)
+		r.Post("/sites/{domain}/rollback", h.RollbackHandler)
+		r.Get("/sites/{domain}/deployments", h.ListDeploymentsHandler)
+
+		// Webhooks
+		r.Post("/sites/{domain}/webhook", h.CreateWebhookHandler)
+		r.Get("/sites/{domain}/webhook", h.ListWebhooksHandler)
+		r.Delete("/sites/{domain}/webhook", h.DeleteWebhookHandler)
+
+		// Logs
+		r.Get("/sites/{domain}/logs", h.SiteLogsHandler)
+		r.Get("/logs", h.AllLogsHandler)
 	})
+
+	r.Post("/webhook/{token}", h.IncomingWebhookHandler)
 
 	return &Server{handler: h, router: r}
 }

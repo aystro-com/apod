@@ -43,6 +43,11 @@ type DriverSetupStep struct {
 	Service string `yaml:"service"`
 }
 
+type DriverDeployHooks struct {
+	BeforeDeploy []string `yaml:"before_deploy,omitempty"`
+	AfterDeploy  []string `yaml:"after_deploy,omitempty"`
+}
+
 type Driver struct {
 	Name        string                   `yaml:"name"`
 	Version     string                   `yaml:"version"`
@@ -53,4 +58,5 @@ type Driver struct {
 	Backup      DriverBackup             `yaml:"backup,omitempty"`
 	Cron        []DriverCron             `yaml:"cron,omitempty"`
 	Setup       []DriverSetupStep        `yaml:"setup,omitempty"`
+	Deploy      DriverDeployHooks        `yaml:"deploy,omitempty"`
 }
