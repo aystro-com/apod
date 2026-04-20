@@ -6,7 +6,7 @@
 .codeium/
 
 # Binary
-apod
+/apod
 
 # Markdown (except README)
 *.md
