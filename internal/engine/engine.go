@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -267,7 +268,9 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		envContent := fmt.Sprintf("APP_ENV=production\nAPP_URL=https://%s\n", opts.Domain)
 		envContent += fmt.Sprintf("DB_CONNECTION=mysql\nDB_HOST=apod-%s-db\nDB_PORT=3306\n", opts.Domain)
 		envContent += fmt.Sprintf("DB_DATABASE=%s\nDB_USERNAME=%s\nDB_PASSWORD=%s\n", dbName, dbUser, dbPass)
-		appKey := "base64:" + randomHex(32)
+		keyBytes := make([]byte, 32)
+		rand.Read(keyBytes)
+		appKey := "base64:" + base64Encode(keyBytes)
 		envContent += fmt.Sprintf("APP_KEY=%s\n", appKey)
 
 		envPath := filepath.Join(siteRoot, ".env")
@@ -409,4 +412,8 @@ func randomHex(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func base64Encode(b []byte) string {
+	return base64.StdEncoding.EncodeToString(b)
 }
