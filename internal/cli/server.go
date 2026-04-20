@@ -48,6 +48,7 @@ var serverCmd = &cobra.Command{
 		}()
 
 		if flagListen != "" {
+			go srv.ListenSocket("")
 			return srv.ListenTCP(flagListen)
 		}
 		return srv.ListenSocket("")
