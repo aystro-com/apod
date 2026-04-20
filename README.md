@@ -470,6 +470,32 @@ apod ftp list <domain>
 apod ftp remove <domain> <username>
 ```
 
+### User Management
+
+Multi-user support with Linux-level isolation. Each user gets their own Linux user, chrooted SFTP access, and sites under `/home/<user>/sites/`.
+
+```bash
+apod user create <name> [--role user|admin]  # Creates Linux user + API key
+apod user list                               # List all users
+apod user delete <name>                      # Remove user (must have no sites)
+apod user reset-key <name>                   # Generate new API key
+```
+
+**How it works:**
+- Each user gets a real Linux user (UID 5000+) with a home directory
+- Sites created by a user live under `/home/<user>/sites/<domain>/`
+- SFTP access is chrooted — users can only see their own sites
+- API keys are SHA-256 hashed (shown only once on create/reset)
+- Users can only manage their own sites via the API
+- Admins see and control everything
+- Unix socket access (local) is always admin
+
+**Remote access as a user:**
+```bash
+apod --remote https://server:8443 --key apod_<key> list
+apod --remote https://server:8443 --key apod_<key> create mysite.com --driver php
+```
+
 ### Activity Log
 
 ```bash
@@ -673,6 +699,15 @@ Error responses:
 | `POST` | `/api/v1/ssh-keys` | Add key | `{"name", "public_key"}` |
 | `GET` | `/api/v1/ssh-keys` | List keys | |
 | `DELETE` | `/api/v1/ssh-keys/{name}` | Remove key | |
+
+### Users (admin only)
+
+| Method | Endpoint | Description | Body |
+|--------|----------|-------------|------|
+| `POST` | `/api/v1/users` | Create user | `{"name", "role": "user"}` |
+| `GET` | `/api/v1/users` | List users | |
+| `DELETE` | `/api/v1/users/{name}` | Delete user | |
+| `POST` | `/api/v1/users/{name}/reset-key` | Reset API key | |
 
 ### Activity Log
 
