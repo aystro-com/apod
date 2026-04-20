@@ -10,31 +10,24 @@ parameters:
 
 services:
   app:
-    image: "linuxserver/unifi-network-application:${unifi_version}"
+    image: "jacobalberty/unifi:${unifi_version}"
     volumes:
-      - "${data_root}/unifi:/config"
+      - "${data_root}/unifi:/unifi"
     ports:
       - "8443"
       - "8080"
       - "3478/udp"
       - "10001/udp"
     environment:
-      PUID: "1000"
-      PGID: "1000"
+      DB_URI: "mongodb://apod-${site_domain}-db:27017/${site_db_name}"
+      STATDB_URI: "mongodb://apod-${site_domain}-db:27017/${site_db_name}_stat"
+      DB_NAME: "${site_db_name}"
       TZ: "UTC"
-      MONGO_USER: "${site_db_user}"
-      MONGO_PASS: "${site_db_pass}"
-      MONGO_HOST: "apod-${site_domain}-db"
-      MONGO_PORT: "27017"
-      MONGO_DBNAME: "${site_db_name}"
 
   db:
-    image: "mongo:7.0"
+    image: "mongo:4.4"
     volumes:
       - "${data_root}/mongodb:/data/db"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: "${site_db_user}"
-      MONGO_INITDB_ROOT_PASSWORD: "${site_db_pass}"
 
 healthcheck:
   url: "https://localhost:8443"
@@ -51,8 +44,8 @@ backup:
 
 setup:
   - name: "Wait for MongoDB"
-    command: "sleep 15"
-    service: app
-  - name: "Verify MongoDB connection"
-    command: "mongosh --host apod-${site_domain}-db -u ${site_db_user} -p ${site_db_pass} --eval 'db.runCommand({ping:1})' 2>/dev/null || sleep 10"
+    command: "sleep 10"
     service: db
+  - name: "Wait for UniFi startup"
+    command: "sleep 30"
+    service: app
