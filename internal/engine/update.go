@@ -15,7 +15,7 @@ import (
 const (
 	Version       = "1.0.0"
 	githubRepo    = "aystro-com/apod"
-	driverRepoURL = "https://raw.githubusercontent.com/aystro-com/apod/main/drivers/"
+	driverRepoURL = "https://raw.githubusercontent.com/aystro-com/apod/master/drivers/"
 )
 
 type GithubRelease struct {
