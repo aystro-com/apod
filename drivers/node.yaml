@@ -1,0 +1,61 @@
+name: node
+version: "1.0"
+description: Node.js + Nginx reverse proxy + PostgreSQL
+
+parameters:
+  node_version:
+    type: string
+    default: "22"
+    options: ["18", "20", "22"]
+  app_port:
+    type: string
+    default: "3000"
+
+services:
+  app:
+    image: "node:${node_version}-alpine"
+    volumes:
+      - "${site_root}:/app"
+    ports:
+      - "${app_port}"
+    environment:
+      NODE_ENV: "production"
+      PORT: "${app_port}"
+      DATABASE_URL: "postgresql://${site_db_user}:${site_db_pass}@apod-${site_domain}-db:5432/${site_db_name}"
+    command: "sh -c 'cd /app && if [ -f package.json ]; then npm start; else node -e \"require(\\\"http\\\").createServer((q,s)=>{s.end(\\\"Ready\\\")}).listen(${app_port})\"; fi'"
+
+  db:
+    image: "postgres:16-alpine"
+    environment:
+      POSTGRES_DB: "${site_db_name}"
+      POSTGRES_USER: "${site_db_user}"
+      POSTGRES_PASSWORD: "${site_db_pass}"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - "${data_root}/postgres:/var/lib/postgresql/data/pgdata"
+
+healthcheck:
+  url: "http://localhost:${app_port}"
+  interval: 10s
+  timeout: 5s
+  retries: 3
+
+backup:
+  paths:
+    - "${site_root}"
+  databases:
+    - type: postgres
+      service: db
+
+deploy:
+  before_deploy:
+    - "cd /app && npm install --production"
+    - "cd /app && if grep -q build package.json; then npm run build; fi"
+
+setup:
+  - name: "Wait for PostgreSQL"
+    command: "until pg_isready -h apod-${site_domain}-db -U ${site_db_user}; do sleep 2; done"
+    service: db
+  - name: "Install dependencies"
+    command: "cd /app && if [ -f package.json ]; then npm install --production 2>/dev/null; fi"
+    service: app

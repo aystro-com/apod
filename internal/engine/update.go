@@ -171,7 +171,7 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 }
 
 func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {
-	drivers := []string{"static.yaml", "wordpress.yaml", "laravel.yaml", "php.yaml", "unifi.yaml", "odoo.yaml"}
+	drivers := []string{"static.yaml", "wordpress.yaml", "laravel.yaml", "php.yaml", "node.yaml", "unifi.yaml", "odoo.yaml"}
 	var updated []string
 
 	for _, name := range drivers {
