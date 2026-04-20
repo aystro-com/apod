@@ -138,3 +138,115 @@ func (h *Handler) ListDrivers(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, drivers)
 }
+
+func (h *Handler) AddDomain(w http.ResponseWriter, r *http.Request) {
+	siteDomain := chi.URLParam(r, "domain")
+	var req struct {
+		Domain string `json:"domain"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Domain == "" {
+		respondError(w, http.StatusBadRequest, "domain is required")
+		return
+	}
+	if err := h.engine.AddDomain(r.Context(), siteDomain, req.Domain); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "added", "domain": req.Domain})
+}
+
+func (h *Handler) RemoveDomain(w http.ResponseWriter, r *http.Request) {
+	siteDomain := chi.URLParam(r, "domain")
+	removeDomain := chi.URLParam(r, "aliasDomain")
+	if err := h.engine.RemoveDomain(r.Context(), siteDomain, removeDomain); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed", "domain": removeDomain})
+}
+
+func (h *Handler) ListDomains(w http.ResponseWriter, r *http.Request) {
+	siteDomain := chi.URLParam(r, "domain")
+	domains, err := h.engine.ListDomains(r.Context(), siteDomain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, domains)
+}
+
+func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	config, err := h.engine.GetConfig(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, config)
+}
+
+func (h *Handler) SetConfig(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Key == "" {
+		respondError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+	if err := h.engine.SetConfig(r.Context(), domain, req.Key, req.Value); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (h *Handler) SetEnv(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Key == "" {
+		respondError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+	if err := h.engine.SetEnv(r.Context(), domain, req.Key, req.Value); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "set", "key": req.Key})
+}
+
+func (h *Handler) UnsetEnv(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	key := chi.URLParam(r, "key")
+	if err := h.engine.UnsetEnv(r.Context(), domain, key); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed", "key": key})
+}
+
+func (h *Handler) ListEnv(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	envs, err := h.engine.ListEnv(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, envs)
+}

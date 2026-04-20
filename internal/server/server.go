@@ -37,6 +37,20 @@ func New(e *engine.Engine) *Server {
 		r.Delete("/sites/{domain}", h.DestroySite)
 
 		r.Get("/drivers", h.ListDrivers)
+
+		// Domain management
+		r.Get("/sites/{domain}/domains", h.ListDomains)
+		r.Post("/sites/{domain}/domains", h.AddDomain)
+		r.Delete("/sites/{domain}/domains/{aliasDomain}", h.RemoveDomain)
+
+		// Config management
+		r.Get("/sites/{domain}/config", h.GetConfig)
+		r.Post("/sites/{domain}/config", h.SetConfig)
+
+		// Env management
+		r.Get("/sites/{domain}/env", h.ListEnv)
+		r.Post("/sites/{domain}/env", h.SetEnv)
+		r.Delete("/sites/{domain}/env/{key}", h.UnsetEnv)
 	})
 
 	return &Server{handler: h, router: r}
