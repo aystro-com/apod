@@ -94,6 +94,13 @@ func New(e *engine.Engine) *Server {
 
 		// Container logs
 		r.Get("/sites/{domain}/container-logs", h.ContainerLogsHandler)
+
+		// Clone
+		r.Post("/sites/{domain}/clone", h.CloneSiteHandler)
+
+		// Database
+		r.Get("/sites/{domain}/db/export", h.DBExportHandler)
+		r.Post("/sites/{domain}/db/import", h.DBImportHandler)
 	})
 
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)
