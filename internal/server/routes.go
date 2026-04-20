@@ -465,6 +465,90 @@ func (h *Handler) IncomingWebhookHandler(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deploying"})
 }
 
+func (h *Handler) MonitorSiteHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	stats, err := h.engine.GetSiteStats(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, stats)
+}
+
+func (h *Handler) MonitorAllHandler(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.engine.GetAllStats(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, stats)
+}
+
+func (h *Handler) EnableUptimeHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		URL          string `json:"url"`
+		Interval     int    `json:"interval"`
+		AlertWebhook string `json:"alert_webhook"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.URL == "" {
+		respondError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	if req.Interval == 0 {
+		req.Interval = 60
+	}
+	if err := h.engine.EnableUptime(r.Context(), domain, req.URL, req.Interval, req.AlertWebhook); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]string{"status": "enabled"})
+}
+
+func (h *Handler) DisableUptimeHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if err := h.engine.DisableUptime(r.Context(), domain); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "disabled"})
+}
+
+func (h *Handler) UptimeStatusHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	status, err := h.engine.GetUptimeStatus(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, status)
+}
+
+func (h *Handler) UptimeLogsHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	logs, err := h.engine.GetUptimeLogs(r.Context(), domain, 50)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, logs)
+}
+
+func (h *Handler) ContainerLogsHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	lines := 100
+	output, err := h.engine.GetContainerLogs(r.Context(), domain, lines)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"logs": output})
+}
+
 func (h *Handler) SiteLogsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
 	logs, err := h.engine.GetLogs(r.Context(), domain, 50)

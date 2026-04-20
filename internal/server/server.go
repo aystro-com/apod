@@ -81,6 +81,19 @@ func New(e *engine.Engine) *Server {
 		// Logs
 		r.Get("/sites/{domain}/logs", h.SiteLogsHandler)
 		r.Get("/logs", h.AllLogsHandler)
+
+		// Monitoring
+		r.Get("/sites/{domain}/monitor", h.MonitorSiteHandler)
+		r.Get("/monitor", h.MonitorAllHandler)
+
+		// Uptime
+		r.Post("/sites/{domain}/uptime", h.EnableUptimeHandler)
+		r.Get("/sites/{domain}/uptime", h.UptimeStatusHandler)
+		r.Delete("/sites/{domain}/uptime", h.DisableUptimeHandler)
+		r.Get("/sites/{domain}/uptime/logs", h.UptimeLogsHandler)
+
+		// Container logs
+		r.Get("/sites/{domain}/container-logs", h.ContainerLogsHandler)
 	})
 
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)
