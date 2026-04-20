@@ -5,7 +5,7 @@ description: Laravel application with Nginx, PHP, Composer, Node
 parameters:
   php_version:
     type: string
-    default: "8.3"
+    default: "8.4"
     options: ["8.1", "8.2", "8.3", "8.4"]
 
 services:
@@ -72,6 +72,12 @@ setup:
   - name: "Generate app key if empty"
     command: "cd /app && if ! grep -q 'APP_KEY=base64' .env; then php artisan key:generate --force; fi"
     service: app
+  - name: "Install dependencies"
+    command: "cd /app && composer install --no-dev --optimize-autoloader --no-interaction 2>/dev/null || true"
+    service: app
   - name: "Run migrations"
     command: "cd /app && php artisan migrate --force 2>/dev/null || true"
+    service: app
+  - name: "Clear config cache"
+    command: "cd /app && php artisan config:clear && php artisan storage:link 2>/dev/null || true"
     service: app
