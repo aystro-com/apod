@@ -250,3 +250,147 @@ func (h *Handler) ListEnv(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, envs)
 }
+
+func (h *Handler) CreateBackupHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Storage string `json:"storage"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	id, err := h.engine.CreateBackup(r.Context(), domain, req.Storage)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]int64{"backup_id": id})
+}
+
+func (h *Handler) ListBackupsHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	backups, err := h.engine.ListBackups(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, backups)
+}
+
+func (h *Handler) RestoreBackupHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		BackupID int64 `json:"backup_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.RestoreBackup(r.Context(), domain, req.BackupID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+}
+
+func (h *Handler) DeleteBackupHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		BackupID int64 `json:"backup_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.DeleteBackup(r.Context(), domain, req.BackupID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) AddBackupScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Every   string `json:"every"`
+		Storage string `json:"storage"`
+		Keep    int    `json:"keep"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Keep == 0 {
+		req.Keep = 7
+	}
+	id, err := h.engine.AddBackupSchedule(r.Context(), domain, req.Every, req.Storage, req.Keep)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]int64{"schedule_id": id})
+}
+
+func (h *Handler) ListBackupSchedulesHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	schedules, err := h.engine.ListBackupSchedules(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, schedules)
+}
+
+func (h *Handler) RemoveBackupScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ScheduleID int64 `json:"schedule_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.RemoveBackupSchedule(r.Context(), req.ScheduleID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+func (h *Handler) AddStorageConfigHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name   string            `json:"name"`
+		Driver string            `json:"driver"`
+		Config map[string]string `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" || req.Driver == "" {
+		respondError(w, http.StatusBadRequest, "name and driver are required")
+		return
+	}
+	configJSON, _ := json.Marshal(req.Config)
+	if err := h.engine.AddStorageConfig(req.Name, req.Driver, string(configJSON)); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]string{"status": "created", "name": req.Name})
+}
+
+func (h *Handler) ListStorageConfigsHandler(w http.ResponseWriter, r *http.Request) {
+	configs, err := h.engine.ListStorageConfigs()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, configs)
+}
+
+func (h *Handler) RemoveStorageConfigHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := h.engine.RemoveStorageConfig(name); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}

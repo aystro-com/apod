@@ -51,6 +51,22 @@ func New(e *engine.Engine) *Server {
 		r.Get("/sites/{domain}/env", h.ListEnv)
 		r.Post("/sites/{domain}/env", h.SetEnv)
 		r.Delete("/sites/{domain}/env/{key}", h.UnsetEnv)
+
+		// Backup management
+		r.Post("/sites/{domain}/backups", h.CreateBackupHandler)
+		r.Get("/sites/{domain}/backups", h.ListBackupsHandler)
+		r.Post("/sites/{domain}/backups/restore", h.RestoreBackupHandler)
+		r.Delete("/sites/{domain}/backups", h.DeleteBackupHandler)
+
+		// Backup schedules
+		r.Post("/sites/{domain}/backups/schedule", h.AddBackupScheduleHandler)
+		r.Get("/sites/{domain}/backups/schedule", h.ListBackupSchedulesHandler)
+		r.Delete("/sites/{domain}/backups/schedule", h.RemoveBackupScheduleHandler)
+
+		// Storage configs
+		r.Post("/storage", h.AddStorageConfigHandler)
+		r.Get("/storage", h.ListStorageConfigsHandler)
+		r.Delete("/storage/{name}", h.RemoveStorageConfigHandler)
 	})
 
 	return &Server{handler: h, router: r}

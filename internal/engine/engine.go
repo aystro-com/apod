@@ -20,12 +20,13 @@ const (
 )
 
 type Engine struct {
-	db      *db.DB
-	docker  *Docker
-	traefik *Traefik
-	drivers *DriverLoader
-	locks   *LockManager
-	dataDir string
+	db        *db.DB
+	docker    *Docker
+	traefik   *Traefik
+	drivers   *DriverLoader
+	locks     *LockManager
+	dataDir   string
+	scheduler *Scheduler
 }
 
 type Config struct {
@@ -56,17 +57,28 @@ func New(cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
 
-	return &Engine{
+	eng := &Engine{
 		db:      database,
 		docker:  docker,
 		traefik: NewTraefik(docker, cfg.AcmeEmail),
 		drivers: NewDriverLoader(cfg.DriverDir),
 		locks:   NewLockManager(),
 		dataDir: cfg.DataDir,
-	}, nil
+	}
+
+	sched := NewScheduler()
+	sched.SetEngine(eng)
+	sched.LoadSchedules()
+	sched.Start()
+	eng.scheduler = sched
+
+	return eng, nil
 }
 
 func (e *Engine) Close() {
+	if e.scheduler != nil {
+		e.scheduler.Stop()
+	}
 	e.db.Close()
 	e.docker.Close()
 }
