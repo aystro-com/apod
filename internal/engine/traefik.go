@@ -37,6 +37,7 @@ func traefikCommand(email string) []string {
 		"--certificatesresolvers.letsencrypt.acme.email=" + email,
 		"--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json",
 		"--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web",
+		"--serversTransport.insecureSkipVerify=true",
 	}
 }
 
