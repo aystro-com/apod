@@ -679,3 +679,189 @@ func (h *Handler) AllLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, logs)
 }
+
+// Proxy rules
+func (h *Handler) AddProxyRuleHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Type   string            `json:"type"`
+		Config map[string]string `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	id, err := h.engine.AddProxyRule(r.Context(), domain, req.Type, req.Config)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]int64{"rule_id": id})
+}
+
+func (h *Handler) ListProxyRulesHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	rules, err := h.engine.ListProxyRules(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, rules)
+}
+
+func (h *Handler) RemoveProxyRuleHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID int64 `json:"id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.RemoveProxyRule(r.Context(), req.ID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// IP blocking
+func (h *Handler) BlockIPHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		IP string `json:"ip"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.BlockIP(r.Context(), domain, req.IP); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "blocked", "ip": req.IP})
+}
+
+func (h *Handler) UnblockIPHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		IP string `json:"ip"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.UnblockIP(r.Context(), domain, req.IP); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "unblocked"})
+}
+
+func (h *Handler) ListIPRulesHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	rules, err := h.engine.ListIPRules(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, rules)
+}
+
+// FTP
+func (h *Handler) AddFTPAccountHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.AddFTPAccount(r.Context(), domain, req.Username, req.Password); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]string{"status": "created", "username": req.Username})
+}
+
+func (h *Handler) ListFTPAccountsHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	accounts, err := h.engine.ListFTPAccounts(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, accounts)
+}
+
+func (h *Handler) RemoveFTPAccountHandler(w http.ResponseWriter, r *http.Request) {
+	username := chi.URLParam(r, "username")
+	if err := h.engine.RemoveFTPAccount(r.Context(), username); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// Firewall
+func (h *Handler) FirewallStatusHandler(w http.ResponseWriter, r *http.Request) {
+	status, err := h.engine.FirewallStatus(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, status)
+}
+
+func (h *Handler) FirewallEnableHandler(w http.ResponseWriter, r *http.Request) {
+	if err := h.engine.FirewallEnable(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "enabled"})
+}
+
+func (h *Handler) FirewallAllowHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Port string `json:"port"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.FirewallAllow(r.Context(), req.Port); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "allowed", "port": req.Port})
+}
+
+func (h *Handler) FirewallDenyHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Port string `json:"port"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.FirewallDeny(r.Context(), req.Port); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "denied", "port": req.Port})
+}
+
+// SSH Keys
+func (h *Handler) AddSSHKeyHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name      string `json:"name"`
+		PublicKey string `json:"public_key"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.AddSSHKey(r.Context(), req.Name, req.PublicKey); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]string{"status": "added", "name": req.Name})
+}
+
+func (h *Handler) ListSSHKeysHandler(w http.ResponseWriter, r *http.Request) {
+	keys, err := h.engine.ListSSHKeys(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, keys)
+}
+
+func (h *Handler) RemoveSSHKeyHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := h.engine.RemoveSSHKey(r.Context(), name); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}

@@ -110,6 +110,32 @@ func New(e *engine.Engine) *Server {
 		r.Post("/sites/{domain}/cron", h.AddCronJobHandler)
 		r.Get("/sites/{domain}/cron", h.ListCronJobsHandler)
 		r.Delete("/sites/{domain}/cron", h.RemoveCronJobHandler)
+
+		// Proxy rules
+		r.Post("/sites/{domain}/proxy", h.AddProxyRuleHandler)
+		r.Get("/sites/{domain}/proxy", h.ListProxyRulesHandler)
+		r.Delete("/sites/{domain}/proxy", h.RemoveProxyRuleHandler)
+
+		// IP blocking
+		r.Post("/sites/{domain}/ip/block", h.BlockIPHandler)
+		r.Post("/sites/{domain}/ip/unblock", h.UnblockIPHandler)
+		r.Get("/sites/{domain}/ip", h.ListIPRulesHandler)
+
+		// FTP
+		r.Post("/sites/{domain}/ftp", h.AddFTPAccountHandler)
+		r.Get("/sites/{domain}/ftp", h.ListFTPAccountsHandler)
+		r.Delete("/sites/{domain}/ftp/{username}", h.RemoveFTPAccountHandler)
+
+		// Firewall
+		r.Get("/firewall", h.FirewallStatusHandler)
+		r.Post("/firewall/enable", h.FirewallEnableHandler)
+		r.Post("/firewall/allow", h.FirewallAllowHandler)
+		r.Post("/firewall/deny", h.FirewallDenyHandler)
+
+		// SSH Keys
+		r.Post("/ssh-keys", h.AddSSHKeyHandler)
+		r.Get("/ssh-keys", h.ListSSHKeysHandler)
+		r.Delete("/ssh-keys/{name}", h.RemoveSSHKeyHandler)
 	})
 
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)
