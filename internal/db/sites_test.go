@@ -91,3 +91,31 @@ func TestDeleteSite(t *testing.T) {
 		t.Fatal("expected error after deletion")
 	}
 }
+
+func TestUpdateSiteConfig(t *testing.T) {
+	d := openTestDB(t)
+	d.CreateSite(&models.Site{Domain: "example.com", Driver: "static", RAM: "128M", CPU: "1"})
+
+	err := d.UpdateSiteConfig("example.com", map[string]string{"ram": "512M", "cpu": "2"})
+	if err != nil {
+		t.Fatalf("UpdateSiteConfig: %v", err)
+	}
+
+	site, _ := d.GetSite("example.com")
+	if site.RAM != "512M" {
+		t.Errorf("got RAM %q, want 512M", site.RAM)
+	}
+	if site.CPU != "2" {
+		t.Errorf("got CPU %q, want 2", site.CPU)
+	}
+}
+
+func TestUpdateSiteConfigUnknownField(t *testing.T) {
+	d := openTestDB(t)
+	d.CreateSite(&models.Site{Domain: "example.com", Driver: "static", RAM: "128M", CPU: "1"})
+
+	err := d.UpdateSiteConfig("example.com", map[string]string{"unknown": "value"})
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+}
