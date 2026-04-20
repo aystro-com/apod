@@ -267,7 +267,8 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		envContent := fmt.Sprintf("APP_ENV=production\nAPP_URL=https://%s\n", opts.Domain)
 		envContent += fmt.Sprintf("DB_CONNECTION=mysql\nDB_HOST=apod-%s-db\nDB_PORT=3306\n", opts.Domain)
 		envContent += fmt.Sprintf("DB_DATABASE=%s\nDB_USERNAME=%s\nDB_PASSWORD=%s\n", dbName, dbUser, dbPass)
-		envContent += "APP_KEY=\n"
+		appKey := "base64:" + randomHex(32)
+		envContent += fmt.Sprintf("APP_KEY=%s\n", appKey)
 
 		envPath := filepath.Join(siteRoot, ".env")
 		// Only write if .env doesn't already exist (don't overwrite user config)

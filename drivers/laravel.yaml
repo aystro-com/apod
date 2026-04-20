@@ -44,10 +44,8 @@ deploy:
     - "cd /app && if [ -f package.json ]; then npm install && npm run build; fi"
   after_deploy:
     - "cd /app && php artisan migrate --force"
-    - "cd /app && php artisan config:cache"
-    - "cd /app && php artisan route:cache"
-    - "cd /app && php artisan view:cache"
     - "cd /app && php artisan storage:link 2>/dev/null || true"
+    - "cd /app && php artisan optimize 2>/dev/null || true"
 
 healthcheck:
   url: "http://localhost:80"
