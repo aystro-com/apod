@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -151,6 +152,19 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		return fmt.Errorf("create data root: %w", err)
 	}
 
+	// Clone git repo if provided
+	if opts.Repo != "" {
+		branch := opts.Branch
+		if branch == "" {
+			branch = "main"
+		}
+		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", opts.Repo, siteRoot)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			e.db.UpdateSiteStatus(opts.Domain, "error")
+			return fmt.Errorf("git clone: %s: %w", string(output), err)
+		}
+	}
+
 	dbPass := randomHex(16)
 	dbName := strings.ReplaceAll(opts.Domain, ".", "_")
 	dbUser := dbName
@@ -245,6 +259,20 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		if err := e.docker.StartContainer(ctx, id); err != nil {
 			e.db.UpdateSiteStatus(opts.Domain, "error")
 			return fmt.Errorf("start container %s: %w", containerName, err)
+		}
+	}
+
+	// Generate .env file for the site with DB credentials and env vars
+	if opts.Repo != "" {
+		envContent := fmt.Sprintf("APP_ENV=production\nAPP_URL=https://%s\n", opts.Domain)
+		envContent += fmt.Sprintf("DB_CONNECTION=mysql\nDB_HOST=apod-%s-db\nDB_PORT=3306\n", opts.Domain)
+		envContent += fmt.Sprintf("DB_DATABASE=%s\nDB_USERNAME=%s\nDB_PASSWORD=%s\n", dbName, dbUser, dbPass)
+		envContent += "APP_KEY=\n"
+
+		envPath := filepath.Join(siteRoot, ".env")
+		// Only write if .env doesn't already exist (don't overwrite user config)
+		if _, err := os.Stat(envPath); os.IsNotExist(err) {
+			os.WriteFile(envPath, []byte(envContent), 0644)
 		}
 	}
 
