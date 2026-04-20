@@ -96,6 +96,15 @@ var migrations = []string{
 		is_up INTEGER NOT NULL DEFAULT 1,
 		checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`CREATE TABLE IF NOT EXISTS cron_jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_domain TEXT NOT NULL,
+		schedule TEXT NOT NULL,
+		command TEXT NOT NULL,
+		service TEXT NOT NULL DEFAULT 'app',
+		active INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
 }
 
 func (d *DB) migrate() error {

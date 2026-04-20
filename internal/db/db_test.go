@@ -16,7 +16,7 @@ func TestOpenAndMigrate(t *testing.T) {
 	}
 	defer d.Close()
 
-	tables := []string{"sites", "domains", "operations", "api_keys", "backups", "storage_configs", "backup_schedules", "deployments", "webhooks", "uptime_checks", "uptime_logs"}
+	tables := []string{"sites", "domains", "operations", "api_keys", "backups", "storage_configs", "backup_schedules", "deployments", "webhooks", "uptime_checks", "uptime_logs", "cron_jobs"}
 	for _, table := range tables {
 		var name string
 		err := d.Conn().QueryRow(
