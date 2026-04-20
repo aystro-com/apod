@@ -28,6 +28,7 @@ type Engine struct {
 	dataDir       string
 	scheduler     *Scheduler
 	uptimeChecker *UptimeChecker
+	cronManager   *CronManager
 }
 
 type Config struct {
@@ -78,6 +79,12 @@ func New(cfg Config) (*Engine, error) {
 	uptimeChecker.Start()
 	eng.uptimeChecker = uptimeChecker
 
+	cronMgr := NewCronManager()
+	cronMgr.SetEngine(eng)
+	cronMgr.LoadJobs()
+	cronMgr.Start()
+	eng.cronManager = cronMgr
+
 	return eng, nil
 }
 
@@ -87,6 +94,9 @@ func (e *Engine) Close() {
 	}
 	if e.uptimeChecker != nil {
 		e.uptimeChecker.Stop()
+	}
+	if e.cronManager != nil {
+		e.cronManager.Stop()
 	}
 	e.db.Close()
 	e.docker.Close()
