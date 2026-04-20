@@ -51,9 +51,6 @@ setup:
     command: "until pg_isready -h apod-${site_domain}-db -U ${site_db_user}; do sleep 2; done"
     service: db
   - name: "Fix Odoo permissions"
-    command: "chown -R odoo:odoo /var/lib/odoo /mnt/extra-addons /etc/odoo 2>/dev/null || true"
+    command: "mkdir -p /var/lib/odoo/.local /var/lib/odoo/sessions /var/lib/odoo/filestore /etc/odoo /mnt/extra-addons && chown -R odoo:odoo /var/lib/odoo /mnt/extra-addons /etc/odoo"
     service: app
     user: root
-  - name: "Wait for Odoo startup"
-    command: "sleep 10"
-    service: app
