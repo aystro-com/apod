@@ -20,14 +20,17 @@ Hosting panels are bloated. PaaS platforms are expensive. Kubernetes is overkill
 # Install
 curl -fsSL https://raw.githubusercontent.com/aystro-com/apod/master/install.sh | sh
 
-# Start the daemon
-apod server --acme-email you@example.com
+# Initialize (sets up systemd, SSL email, drivers)
+apod init
 
-# Create a site
-apod create myapp --driver laravel --domain myapp.com
+# Create a blank PHP site (like CloudPanel)
+apod create mysite.com --driver php
 
-# Deploy from git
-apod deploy myapp --repo git@github.com:you/app.git --branch main
+# Or create and deploy a Laravel app from git in one command
+apod create myapp.com --driver laravel --repo https://github.com/you/app.git --branch main
+
+# Shell into a site
+apod access mysite.com
 
 # Check status
 apod list
@@ -102,10 +105,12 @@ systemctl start apod
 ### Updating
 
 ```bash
-apod update              # Update apod binary
-apod update drivers      # Update built-in drivers
+apod update              # Update binary + drivers in one command
+apod update drivers      # Update built-in drivers only
 apod version             # Check current version
 ```
+
+After updating, restart the daemon: `systemctl restart apod`
 
 ---
 
@@ -163,8 +168,12 @@ Drivers are YAML files that define application stacks. Each driver specifies Doc
 | Driver | Stack | Image |
 |--------|-------|-------|
 | `static` | Nginx | `nginx:alpine` |
+| `php` | PHP + Nginx + MySQL (blank, no git) | `webdevops/php-nginx-dev:8.4` + `mysql:8.0` |
 | `wordpress` | WordPress + Apache + MySQL | `wordpress:php8.3-apache` + `mysql:8.0` |
 | `laravel` | PHP 8.4 + Nginx + MySQL | `webdevops/php-nginx-dev:8.4` + `mysql:8.0` |
+| `node` | Node.js + PostgreSQL | `node:22-alpine` + `postgres:16-alpine` |
+| `odoo` | Odoo ERP + PostgreSQL | `odoo:17.0` + `postgres:16-alpine` |
+| `unifi` | UniFi Network Controller + MongoDB | `jacobalberty/unifi:latest` + `mongo:4.4` |
 
 ### Writing a Custom Driver
 
@@ -245,13 +254,19 @@ Driver parameters (defined in `parameters:`) are also available as variables. Fo
 
 | Section | Required | Description |
 |---------|----------|-------------|
-| `services` | Yes | Docker containers to create (image, volumes, ports, env, command) |
+| `services` | Yes | Docker containers to create (image, volumes, ports, env, command, backend_scheme) |
 | `parameters` | No | User-configurable values with defaults and options |
 | `deploy` | No | `before_deploy` and `after_deploy` hook commands for git deploys |
 | `healthcheck` | No | HTTP endpoint to verify site health |
 | `backup` | No | Paths and databases to include in backups |
 | `cron` | No | Default cron jobs created with the site |
-| `setup` | No | Commands to run after initial site creation |
+| `setup` | No | Commands to run after initial site creation (supports `user: root`) |
+
+**Service options:**
+- `backend_scheme: "https"` — tells Traefik the backend uses HTTPS (e.g., UniFi controller)
+
+**Setup step options:**
+- `user: root` — run the setup command as root inside the container (useful for fixing permissions)
 
 ---
 
@@ -260,13 +275,15 @@ Driver parameters (defined in `parameters:`) are also available as variables. Fo
 ### Sites
 
 ```bash
-apod create <domain> --driver <name> [--ram 256M] [--cpu 1] [--repo <url>] [--branch main]
+apod init                                # First-run setup wizard
+apod create <domain> --driver <name> [--ram 256M] [--cpu 1] [--repo <url>] [--branch main] [--deploy]
 apod destroy <domain> [--purge]          # --purge removes all data
 apod start <domain>
 apod stop <domain>
 apod restart <domain>
 apod list                                # List all sites
-apod stats <domain>                      # Show site details
+apod status <domain>                     # Detailed site info + resource usage
+apod access <domain> [--shell bash]      # Interactive shell into container
 apod clone <source> <target>             # Full site copy
 ```
 
@@ -376,7 +393,9 @@ apod cron remove <domain> <cron-id>
 apod top                         # Live CPU/RAM for all sites
 apod server-stats                # Server totals (CPU, RAM, disk, site count)
 apod disk-usage                  # Disk usage per site
-apod tail <domain>               # Container stdout/stderr
+apod tail <domain>               # Container stdout/stderr (last 100 lines)
+apod tail <domain> -f            # Follow log output in real time
+apod tail <domain> -n 50         # Show last 50 lines
 ```
 
 ### Uptime Monitoring
@@ -462,9 +481,10 @@ apod logs <domain>           # Operations for a specific site
 
 ```bash
 apod version                 # Show version + DB schema version
-apod update                  # Self-update binary from GitHub releases
-apod update drivers          # Pull latest driver YAMLs
+apod update                  # Self-update binary + drivers from GitHub releases
+apod update drivers          # Pull latest driver YAMLs only
 apod driver list             # Show installed drivers
+apod init                    # First-run setup (Docker check, SSL email, systemd)
 ```
 
 ---
@@ -732,7 +752,7 @@ drivers/               Built-in driver YAML files
 
 ```bash
 # Clone and build
-git clone https://github.com/aystro/apod.git
+git clone https://github.com/aystro-com/apod.git
 cd apod && go build ./...
 
 # Run tests
