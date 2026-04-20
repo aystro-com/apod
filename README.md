@@ -57,6 +57,7 @@ apod list
 - Go 1.22+ (for building from source)
 - Root access
 - Ports 80 and 443 available
+- `quota` package (for disk quota enforcement): `apt install quota`
 
 ### Quick Install
 
@@ -276,7 +277,7 @@ Driver parameters (defined in `parameters:`) are also available as variables. Fo
 
 ```bash
 apod init                                # First-run setup wizard
-apod create <domain> --driver <name> [--ram 256M] [--cpu 1] [--repo <url>] [--branch main] [--deploy]
+apod create <domain> --driver <name> [--ram 256M] [--cpu 1] [--storage 5G] [--repo <url>] [--branch main] [--deploy]
 apod destroy <domain> [--purge]          # --purge removes all data
 apod start <domain>
 apod stop <domain>
@@ -297,6 +298,35 @@ apod domain remove <site-domain> <alias>
 apod domain list <site-domain>
 ```
 
+### Resource Limits
+
+All limits are enforced at the kernel/Docker level — no bypass possible.
+
+```bash
+apod create mysite.com --driver php --ram 512M --cpu 2 --storage 10G
+apod config set mysite.com --set-key ram --set-value 1G
+apod config set mysite.com --set-key storage --set-value 20G
+```
+
+| Resource | Flag | Enforcement | Effect |
+|----------|------|-------------|--------|
+| RAM | `--ram 256M` | Docker memory limit | OOM kill if exceeded |
+| CPU | `--cpu 1` | Docker CPU limit | Hard cap on CPU time |
+| Disk | `--storage 5G` | Linux `setquota` on user UID | `Disk quota exceeded` error on write |
+
+**Disk quota setup** (one-time, required for `--storage` to work):
+
+```bash
+apt install quota
+mount -o remount,usrquota /
+quotacheck -cum /
+quotaon /
+```
+
+Add `usrquota` to `/etc/fstab` for persistence across reboots.
+
+Disk quotas apply per user — the total storage for all of a user's sites is summed and enforced as one quota on their Linux UID. Admin-owned sites (no `--owner`) have no disk quota.
+
 ### Configuration
 
 ```bash
@@ -304,7 +334,7 @@ apod config get <domain>
 apod config set <domain> --set-key <key> --set-value <value>
 ```
 
-Keys: `ram`, `cpu`, `repo`, `branch`
+Keys: `ram`, `cpu`, `storage`, `repo`, `branch`
 
 ### Environment Variables
 
@@ -549,7 +579,7 @@ Error responses:
 
 | Method | Endpoint | Description | Body |
 |--------|----------|-------------|------|
-| `POST` | `/api/v1/sites` | Create site | `{"domain", "driver", "ram", "cpu", "repo", "branch"}` |
+| `POST` | `/api/v1/sites` | Create site | `{"domain", "driver", "ram", "cpu", "storage", "repo", "branch"}` |
 | `GET` | `/api/v1/sites` | List all sites | |
 | `GET` | `/api/v1/sites/{domain}` | Get site details | |
 | `POST` | `/api/v1/sites/{domain}/start` | Start site | |
