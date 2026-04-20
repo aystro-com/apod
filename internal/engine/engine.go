@@ -20,13 +20,14 @@ const (
 )
 
 type Engine struct {
-	db        *db.DB
-	docker    *Docker
-	traefik   *Traefik
-	drivers   *DriverLoader
-	locks     *LockManager
-	dataDir   string
-	scheduler *Scheduler
+	db            *db.DB
+	docker        *Docker
+	traefik       *Traefik
+	drivers       *DriverLoader
+	locks         *LockManager
+	dataDir       string
+	scheduler     *Scheduler
+	uptimeChecker *UptimeChecker
 }
 
 type Config struct {
@@ -72,12 +73,20 @@ func New(cfg Config) (*Engine, error) {
 	sched.Start()
 	eng.scheduler = sched
 
+	// Start uptime checker
+	uptimeChecker := NewUptimeChecker(eng)
+	uptimeChecker.Start()
+	eng.uptimeChecker = uptimeChecker
+
 	return eng, nil
 }
 
 func (e *Engine) Close() {
 	if e.scheduler != nil {
 		e.scheduler.Stop()
+	}
+	if e.uptimeChecker != nil {
+		e.uptimeChecker.Stop()
 	}
 	e.db.Close()
 	e.docker.Close()
