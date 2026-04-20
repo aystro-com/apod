@@ -24,7 +24,6 @@ services:
       DB_DATABASE: "${site_db_name}"
       DB_USERNAME: "${site_db_user}"
       DB_PASSWORD: "${site_db_pass}"
-      APP_KEY: ""
       APP_URL: "https://${site_domain}"
       APP_ENV: "production"
 
