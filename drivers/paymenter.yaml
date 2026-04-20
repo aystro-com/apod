@@ -33,7 +33,7 @@ services:
       APP_ENV: "production"
 
   db:
-    image: "mariadb:10.11"
+    image: "mysql:8.0"
     environment:
       MYSQL_DATABASE: "${site_db_name}"
       MYSQL_USER: "${site_db_user}"
@@ -78,11 +78,14 @@ setup:
     command: "cd /app && if [ ! -f artisan ]; then curl -Lo paymenter.tar.gz https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz && tar -xzf paymenter.tar.gz && rm paymenter.tar.gz; fi"
     service: app
   - name: "Fix permissions"
-    command: "cd /app && chmod -R 755 storage bootstrap/cache"
+    command: "cd /app && chmod -R 777 storage bootstrap/cache"
     service: app
     user: root
   - name: "Generate .env"
     command: "cd /app && if [ ! -f .env ]; then cp .env.example .env; fi"
+    service: app
+  - name: "Configure .env"
+    command: "cd /app && sed -i 's|DB_CONNECTION=.*|DB_CONNECTION=mysql|' .env && sed -i 's|DB_HOST=.*|DB_HOST=apod-${site_domain}-db|' .env && sed -i 's|DB_PORT=.*|DB_PORT=3306|' .env && sed -i 's|DB_DATABASE=.*|DB_DATABASE=${site_db_name}|' .env && sed -i 's|DB_USERNAME=.*|DB_USERNAME=${site_db_user}|' .env && sed -i 's|DB_PASSWORD=.*|DB_PASSWORD=${site_db_pass}|' .env && sed -i 's|REDIS_HOST=.*|REDIS_HOST=apod-${site_domain}-redis|' .env && sed -i 's|APP_URL=.*|APP_URL=https://${site_domain}|' .env"
     service: app
   - name: "Install dependencies"
     command: "cd /app && composer install --no-dev --optimize-autoloader --no-interaction"
