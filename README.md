@@ -18,7 +18,7 @@ Hosting panels are bloated. PaaS platforms are expensive. Kubernetes is overkill
 
 ```bash
 # Install
-curl -fsSL https://get.apod.dev | sh
+curl -fsSL https://raw.githubusercontent.com/aystro-com/apod/master/install.sh | sh
 
 # Create a site
 apod create myapp --driver laravel --domain myapp.com

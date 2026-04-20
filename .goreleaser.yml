@@ -1,0 +1,30 @@
+version: 2
+
+builds:
+  - main: ./cmd/apod
+    binary: apod
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "apod_{{ .Os }}_{{ .Arch }}"
+
+release:
+  github:
+    owner: aystro-com
+    name: apod
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
