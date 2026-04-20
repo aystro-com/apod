@@ -63,6 +63,22 @@ var migrations = []string{
 		keep_count INTEGER NOT NULL DEFAULT 7,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`CREATE TABLE IF NOT EXISTS deployments (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_domain TEXT NOT NULL,
+		commit_hash TEXT NOT NULL DEFAULT '',
+		branch TEXT NOT NULL DEFAULT 'main',
+		status TEXT NOT NULL DEFAULT 'pending',
+		previous_image TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS webhooks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_domain TEXT NOT NULL,
+		token TEXT NOT NULL UNIQUE,
+		active INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
 }
 
 func (d *DB) migrate() error {
