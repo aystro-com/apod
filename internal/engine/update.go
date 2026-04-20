@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +14,8 @@ import (
 
 const (
 	Version       = "1.0.0"
-	githubRepo    = "aystro/apod"
-	driverRepoURL = "https://raw.githubusercontent.com/aystro/apod/main/drivers/"
+	githubRepo    = "aystro-com/apod"
+	driverRepoURL = "https://raw.githubusercontent.com/aystro-com/apod/main/drivers/"
 )
 
 type GithubRelease struct {
@@ -63,8 +65,8 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 		return fmt.Errorf("parse release: %w", err)
 	}
 
-	// Find binary for current OS/arch
-	targetName := fmt.Sprintf("apod_%s_%s", runtime.GOOS, runtime.GOARCH)
+	// Find tarball for current OS/arch (goreleaser format: apod_linux_amd64.tar.gz)
+	targetName := fmt.Sprintf("apod_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 	var downloadURL string
 	for _, asset := range release.Assets {
 		if asset.Name == targetName {
@@ -74,15 +76,45 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 	}
 
 	if downloadURL == "" {
-		return fmt.Errorf("no binary found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, release.TagName)
+		return fmt.Errorf("no release found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, release.TagName)
 	}
 
-	// Download new binary
+	// Download tarball
 	binResp, err := http.Get(downloadURL)
 	if err != nil {
-		return fmt.Errorf("download binary: %w", err)
+		return fmt.Errorf("download release: %w", err)
 	}
 	defer binResp.Body.Close()
+
+	// Extract binary from tar.gz
+	gzr, err := gzip.NewReader(binResp.Body)
+	if err != nil {
+		return fmt.Errorf("decompress: %w", err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	var binaryData []byte
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar: %w", err)
+		}
+		if hdr.Name == "apod" {
+			binaryData, err = io.ReadAll(tr)
+			if err != nil {
+				return fmt.Errorf("read binary from archive: %w", err)
+			}
+			break
+		}
+	}
+
+	if binaryData == nil {
+		return fmt.Errorf("binary 'apod' not found in archive")
+	}
 
 	// Get current binary path
 	execPath, err := os.Executable()
@@ -92,20 +124,9 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 
 	// Write to temp file next to the binary
 	tmpPath := execPath + ".new"
-	tmp, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+	if err := os.WriteFile(tmpPath, binaryData, 0755); err != nil {
+		return fmt.Errorf("write new binary: %w", err)
 	}
-
-	if _, err := io.Copy(tmp, binResp.Body); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("download: %w", err)
-	}
-	tmp.Close()
-
-	// Make executable
-	os.Chmod(tmpPath, 0755)
 
 	// Atomic replace: rename old, rename new, remove old
 	oldPath := execPath + ".old"
@@ -126,7 +147,7 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 }
 
 func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {
-	drivers := []string{"static.yaml", "wordpress.yaml", "laravel.yaml"}
+	drivers := []string{"static.yaml", "wordpress.yaml", "laravel.yaml", "unifi.yaml", "odoo.yaml"}
 	var updated []string
 
 	for _, name := range drivers {

@@ -55,12 +55,20 @@ apod list
 - Root access
 - Ports 80 and 443 available
 
+### Quick Install
+
+```bash
+curl -sL https://github.com/aystro-com/apod/releases/latest/download/apod_linux_amd64.tar.gz | tar xz -C /usr/local/bin apod
+mkdir -p /etc/apod/drivers
+apod update drivers
+```
+
 ### From Source
 
 ```bash
-git clone https://github.com/aystro/apod.git
+git clone https://github.com/aystro-com/apod.git
 cd apod
-go build -o /usr/local/bin/apod ./cmd/apod/
+CGO_ENABLED=1 go build -o /usr/local/bin/apod ./cmd/apod/
 mkdir -p /etc/apod/drivers
 cp drivers/*.yaml /etc/apod/drivers/
 ```

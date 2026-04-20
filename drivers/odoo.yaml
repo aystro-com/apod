@@ -1,0 +1,55 @@
+name: odoo
+version: "1.0"
+description: Odoo ERP with PostgreSQL
+
+parameters:
+  odoo_version:
+    type: string
+    default: "17.0"
+    options: ["16.0", "17.0", "18.0"]
+
+services:
+  app:
+    image: "odoo:${odoo_version}"
+    volumes:
+      - "${data_root}/odoo/data:/var/lib/odoo"
+      - "${data_root}/odoo/addons:/mnt/extra-addons"
+      - "${data_root}/odoo/config:/etc/odoo"
+    ports:
+      - "8069"
+    environment:
+      HOST: "apod-${site_domain}-db"
+      PORT: "5432"
+      USER: "${site_db_user}"
+      PASSWORD: "${site_db_pass}"
+
+  db:
+    image: "postgres:16-alpine"
+    environment:
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "${site_db_user}"
+      POSTGRES_PASSWORD: "${site_db_pass}"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - "${data_root}/postgres:/var/lib/postgresql/data/pgdata"
+
+healthcheck:
+  url: "http://localhost:8069"
+  interval: 15s
+  timeout: 10s
+  retries: 5
+
+backup:
+  paths:
+    - "${data_root}/odoo"
+  databases:
+    - type: postgres
+      service: db
+
+setup:
+  - name: "Wait for PostgreSQL"
+    command: "until pg_isready -h apod-${site_domain}-db -U ${site_db_user}; do sleep 2; done"
+    service: db
+  - name: "Wait for Odoo startup"
+    command: "sleep 20"
+    service: app

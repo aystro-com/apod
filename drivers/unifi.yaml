@@ -1,0 +1,58 @@
+name: unifi
+version: "1.0"
+description: UniFi Network Application with MongoDB
+
+parameters:
+  unifi_version:
+    type: string
+    default: "8.6"
+    options: ["8.4", "8.5", "8.6"]
+
+services:
+  app:
+    image: "lscr.io/linuxserver/unifi-network-application:${unifi_version}"
+    volumes:
+      - "${data_root}/unifi:/config"
+    ports:
+      - "8443"
+      - "8080"
+      - "3478/udp"
+      - "10001/udp"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: "UTC"
+      MONGO_USER: "${site_db_user}"
+      MONGO_PASS: "${site_db_pass}"
+      MONGO_HOST: "apod-${site_domain}-db"
+      MONGO_PORT: "27017"
+      MONGO_DBNAME: "${site_db_name}"
+
+  db:
+    image: "mongo:7.0"
+    volumes:
+      - "${data_root}/mongodb:/data/db"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${site_db_user}"
+      MONGO_INITDB_ROOT_PASSWORD: "${site_db_pass}"
+
+healthcheck:
+  url: "https://localhost:8443"
+  interval: 30s
+  timeout: 10s
+  retries: 5
+
+backup:
+  paths:
+    - "${data_root}/unifi"
+  databases:
+    - type: mongo
+      service: db
+
+setup:
+  - name: "Wait for MongoDB"
+    command: "sleep 15"
+    service: app
+  - name: "Verify MongoDB connection"
+    command: "mongosh --host apod-${site_domain}-db -u ${site_db_user} -p ${site_db_pass} --eval 'db.runCommand({ping:1})' 2>/dev/null || sleep 10"
+    service: db
