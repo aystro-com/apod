@@ -32,13 +32,3 @@ func New(driver string, config map[string]string) (Storage, error) {
 	}
 }
 
-// Stubs — replaced by actual implementations in s3.go, r2.go, sftp.go
-func NewS3(config map[string]string) (Storage, error) {
-	return nil, fmt.Errorf("s3 storage not yet implemented")
-}
-func NewR2(config map[string]string) (Storage, error) {
-	return nil, fmt.Errorf("r2 storage not yet implemented")
-}
-func NewSFTP(config map[string]string) (Storage, error) {
-	return nil, fmt.Errorf("sftp storage not yet implemented")
-}
