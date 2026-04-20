@@ -17,22 +17,17 @@ Hosting panels are bloated. PaaS platforms are expensive. Kubernetes is overkill
 ## Quick Start
 
 ```bash
-# Install (from source)
-git clone https://github.com/aystro/apod.git
-cd apod && go build -o /usr/local/bin/apod ./cmd/apod/
-
-# Install drivers
-mkdir -p /etc/apod/drivers
-cp drivers/*.yaml /etc/apod/drivers/
+# Install
+curl -fsSL https://raw.githubusercontent.com/aystro-com/apod/master/install.sh | sh
 
 # Start the daemon
 apod server --acme-email you@example.com
 
-# Create a Laravel site from a git repo
-apod create myapp.com --driver laravel --ram 1G --repo https://github.com/user/app.git --branch main
+# Create a site
+apod create myapp --driver laravel --domain myapp.com
 
-# Deploy (install deps, run migrations)
-apod deploy myapp.com
+# Deploy from git
+apod deploy myapp --repo git@github.com:you/app.git --branch main
 
 # Check status
 apod list
