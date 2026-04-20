@@ -1,14 +1,28 @@
 version: 2
 
 builds:
-  - main: ./cmd/apod
+  - id: apod-amd64
+    main: ./cmd/apod
     binary: apod
     env:
       - CGO_ENABLED=1
+      - CC=gcc
     goos:
       - linux
     goarch:
       - amd64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+  - id: apod-arm64
+    main: ./cmd/apod
+    binary: apod
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+    goos:
+      - linux
+    goarch:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}}
