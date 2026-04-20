@@ -76,4 +76,7 @@ func ExpandDriverVariables(driver *models.Driver, vars map[string]string) {
 		svc.Command = expandVariables(svc.Command, vars)
 		driver.Services[name] = svc
 	}
+	for i, step := range driver.Setup {
+		driver.Setup[i].Command = expandVariables(step.Command, vars)
+	}
 }
