@@ -865,3 +865,42 @@ func (h *Handler) RemoveSSHKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
+
+func (h *Handler) VersionHandler(w http.ResponseWriter, r *http.Request) {
+	version := h.engine.GetVersion()
+	dbVersion := h.engine.GetDBVersion()
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"version":    version,
+		"db_version": dbVersion,
+	})
+}
+
+func (h *Handler) CheckUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	latest, hasUpdate, err := h.engine.CheckForUpdate(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"current":    engine.Version,
+		"latest":     latest,
+		"has_update": hasUpdate,
+	})
+}
+
+func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
+	if err := h.engine.SelfUpdate(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "updated", "message": "restart apod server to use new version"})
+}
+
+func (h *Handler) UpdateDriversHandler(w http.ResponseWriter, r *http.Request) {
+	updated, err := h.engine.UpdateDrivers(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"updated": updated})
+}

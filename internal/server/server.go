@@ -136,6 +136,12 @@ func New(e *engine.Engine) *Server {
 		r.Post("/ssh-keys", h.AddSSHKeyHandler)
 		r.Get("/ssh-keys", h.ListSSHKeysHandler)
 		r.Delete("/ssh-keys/{name}", h.RemoveSSHKeyHandler)
+
+		// System
+		r.Get("/version", h.VersionHandler)
+		r.Get("/update/check", h.CheckUpdateHandler)
+		r.Post("/update", h.UpdateHandler)
+		r.Post("/update/drivers", h.UpdateDriversHandler)
 	})
 
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)

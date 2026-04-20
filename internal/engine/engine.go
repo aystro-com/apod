@@ -358,6 +358,10 @@ func (e *Engine) ListDrivers() ([]models.Driver, error) {
 	return e.drivers.List()
 }
 
+func (e *Engine) GetDBVersion() int {
+	return e.db.CurrentVersion()
+}
+
 func parseMemoryMB(s string) int64 {
 	s = strings.TrimSpace(strings.ToUpper(s))
 	if strings.HasSuffix(s, "G") {
