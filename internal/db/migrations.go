@@ -39,6 +39,30 @@ var migrations = []string{
 		scope TEXT NOT NULL DEFAULT '*',
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`CREATE TABLE IF NOT EXISTS backups (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_domain TEXT NOT NULL,
+		storage_name TEXT NOT NULL DEFAULT 'local',
+		path TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'completed',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS storage_configs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		driver TEXT NOT NULL,
+		config TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS backup_schedules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_domain TEXT NOT NULL,
+		cron_expr TEXT NOT NULL,
+		storage_name TEXT NOT NULL DEFAULT 'local',
+		keep_count INTEGER NOT NULL DEFAULT 7,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
 }
 
 func (d *DB) migrate() error {
