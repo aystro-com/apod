@@ -18,6 +18,7 @@ var (
 	flagDBPath    string
 	flagDataDir   string
 	flagDriverDir string
+	flagAcmeEmail string
 )
 
 var serverCmd = &cobra.Command{
@@ -28,6 +29,7 @@ var serverCmd = &cobra.Command{
 			DBPath:    flagDBPath,
 			DataDir:   flagDataDir,
 			DriverDir: flagDriverDir,
+			AcmeEmail: flagAcmeEmail,
 		})
 		if err != nil {
 			return fmt.Errorf("initialize engine: %w", err)
@@ -58,5 +60,6 @@ func init() {
 	serverCmd.Flags().StringVar(&flagDBPath, "db", "", "Database path (default /etc/apod/apod.db)")
 	serverCmd.Flags().StringVar(&flagDataDir, "data-dir", "", "Data directory (default /var/lib/apod)")
 	serverCmd.Flags().StringVar(&flagDriverDir, "driver-dir", "", "Driver directory (default /etc/apod/drivers)")
+	serverCmd.Flags().StringVar(&flagAcmeEmail, "acme-email", "", "Email for Let's Encrypt certificates")
 	rootCmd.AddCommand(serverCmd)
 }

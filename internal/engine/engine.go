@@ -32,6 +32,7 @@ type Config struct {
 	DBPath    string
 	DataDir   string
 	DriverDir string
+	AcmeEmail string
 }
 
 func New(cfg Config) (*Engine, error) {
@@ -58,7 +59,7 @@ func New(cfg Config) (*Engine, error) {
 	return &Engine{
 		db:      database,
 		docker:  docker,
-		traefik: NewTraefik(docker),
+		traefik: NewTraefik(docker, cfg.AcmeEmail),
 		drivers: NewDriverLoader(cfg.DriverDir),
 		locks:   NewLockManager(),
 		dataDir: cfg.DataDir,

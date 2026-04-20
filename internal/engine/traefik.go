@@ -13,11 +13,31 @@ const (
 )
 
 type Traefik struct {
-	docker *Docker
+	docker    *Docker
+	acmeEmail string
 }
 
-func NewTraefik(docker *Docker) *Traefik {
-	return &Traefik{docker: docker}
+func NewTraefik(docker *Docker, acmeEmail string) *Traefik {
+	return &Traefik{docker: docker, acmeEmail: acmeEmail}
+}
+
+func traefikCommand(email string) []string {
+	if email == "" {
+		email = "admin@localhost"
+	}
+	return []string{
+		"--api.dashboard=false",
+		"--providers.docker=true",
+		"--providers.docker.exposedbydefault=false",
+		"--providers.docker.network=" + apodNetwork,
+		"--entrypoints.web.address=:80",
+		"--entrypoints.websecure.address=:443",
+		"--entrypoints.web.http.redirections.entrypoint.to=websecure",
+		"--entrypoints.web.http.redirections.entrypoint.scheme=https",
+		"--certificatesresolvers.letsencrypt.acme.email=" + email,
+		"--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json",
+		"--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web",
+	}
 }
 
 func (t *Traefik) EnsureRunning(ctx context.Context) error {
@@ -37,6 +57,8 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 		return fmt.Errorf("pull traefik image: %w", err)
 	}
 
+	cmd := traefikCommand(t.acmeEmail)
+
 	id, err := t.docker.CreateContainer(ctx, ContainerConfig{
 		Name:  traefikContainerName,
 		Image: traefikImage,
@@ -44,10 +66,15 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 			"apod.managed": "true",
 			"apod.role":    "proxy",
 		},
-		Env: []string{},
 		Volumes: map[string]string{
 			"/var/run/docker.sock": "/var/run/docker.sock",
+			"apod-letsencrypt":     "/letsencrypt",
 		},
+		Ports: map[string]string{
+			"80":  "80",
+			"443": "443",
+		},
+		Command: strings.Join(cmd, " "),
 	})
 	if err != nil {
 		return fmt.Errorf("create traefik container: %w", err)

@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 )
 
 const labelPrefix = "apod."
@@ -57,6 +58,7 @@ type ContainerConfig struct {
 	MemoryMB    int64
 	CPUs        float64
 	Command     string
+	Ports       map[string]string // container_port -> host_port
 }
 
 func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (string, error) {
@@ -92,17 +94,27 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		cmd = []string{"sh", "-c", cfg.Command}
 	}
 
+	portBindings := nat.PortMap{}
+	exposedPorts := nat.PortSet{}
+	for containerPort, hostPort := range cfg.Ports {
+		port := nat.Port(containerPort + "/tcp")
+		exposedPorts[port] = struct{}{}
+		portBindings[port] = []nat.PortBinding{{HostPort: hostPort}}
+	}
+
 	resp, err := d.cli.ContainerCreate(ctx,
 		&container.Config{
-			Image:  cfg.Image,
-			Env:    env,
-			Labels: cfg.Labels,
-			Cmd:    cmd,
+			Image:        cfg.Image,
+			Env:          env,
+			Labels:       cfg.Labels,
+			Cmd:          cmd,
+			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
 			Mounts:        mounts,
 			Resources:     resources,
 			RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
+			PortBindings:  portBindings,
 		},
 		&network.NetworkingConfig{},
 		nil,
