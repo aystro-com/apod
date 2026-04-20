@@ -74,6 +74,35 @@ func (d *DB) UpdateSiteStatus(domain, status string) error {
 	return nil
 }
 
+func (d *DB) UpdateSiteConfig(domain string, fields map[string]string) error {
+	for key, value := range fields {
+		var query string
+		switch key {
+		case "ram":
+			query = `UPDATE sites SET ram = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
+		case "cpu":
+			query = `UPDATE sites SET cpu = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
+		case "env":
+			query = `UPDATE sites SET env = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
+		case "repo":
+			query = `UPDATE sites SET repo = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
+		case "branch":
+			query = `UPDATE sites SET branch = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
+		default:
+			return fmt.Errorf("unknown config field: %s", key)
+		}
+		result, err := d.conn.Exec(query, value, domain)
+		if err != nil {
+			return fmt.Errorf("update %s: %w", key, err)
+		}
+		n, _ := result.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("site %q not found", domain)
+		}
+	}
+	return nil
+}
+
 func (d *DB) DeleteSite(domain string) error {
 	result, err := d.conn.Exec(`DELETE FROM sites WHERE domain = ?`, domain)
 	if err != nil {
