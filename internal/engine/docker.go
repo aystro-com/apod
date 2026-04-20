@@ -196,10 +196,15 @@ func (d *Docker) ConnectNetwork(ctx context.Context, networkName, containerID st
 }
 
 func (d *Docker) ExecInContainer(ctx context.Context, containerID string, cmd []string) (string, error) {
+	return d.ExecInContainerAs(ctx, containerID, cmd, "")
+}
+
+func (d *Docker) ExecInContainerAs(ctx context.Context, containerID string, cmd []string, user string) (string, error) {
 	exec, err := d.cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
+		User:         user,
 	})
 	if err != nil {
 		return "", fmt.Errorf("create exec: %w", err)

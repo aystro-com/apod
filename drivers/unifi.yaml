@@ -5,12 +5,12 @@ description: UniFi Network Application with MongoDB
 parameters:
   unifi_version:
     type: string
-    default: "8.6"
-    options: ["8.4", "8.5", "8.6"]
+    default: "latest"
+    options: ["latest"]
 
 services:
   app:
-    image: "lscr.io/linuxserver/unifi-network-application:${unifi_version}"
+    image: "linuxserver/unifi-network-application:${unifi_version}"
     volumes:
       - "${data_root}/unifi:/config"
     ports:

@@ -282,7 +282,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 
 	for _, step := range driver.Setup {
 		containerName := fmt.Sprintf("apod-%s-%s", opts.Domain, step.Service)
-		_, err := e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", step.Command})
+		_, err := e.docker.ExecInContainerAs(ctx, containerName, []string{"sh", "-c", step.Command}, step.User)
 		if err != nil {
 			e.db.UpdateSiteStatus(opts.Domain, "error")
 			return fmt.Errorf("setup step %q: %w", step.Name, err)

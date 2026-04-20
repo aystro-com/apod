@@ -41,6 +41,7 @@ type DriverSetupStep struct {
 	Name    string `yaml:"name"`
 	Command string `yaml:"command"`
 	Service string `yaml:"service"`
+	User    string `yaml:"user,omitempty"`
 }
 
 type DriverDeployHooks struct {

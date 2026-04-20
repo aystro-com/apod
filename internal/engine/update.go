@@ -31,16 +31,9 @@ func (e *Engine) GetVersion() string {
 }
 
 func (e *Engine) CheckForUpdate(ctx context.Context) (string, bool, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
-	resp, err := http.Get(url)
+	release, err := fetchLatestRelease()
 	if err != nil {
-		return "", false, fmt.Errorf("check for updates: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var release GithubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", false, fmt.Errorf("parse release: %w", err)
+		return "", false, err
 	}
 
 	latest := release.TagName
@@ -52,17 +45,47 @@ func (e *Engine) CheckForUpdate(ctx context.Context) (string, bool, error) {
 	return latest, hasUpdate, nil
 }
 
-func (e *Engine) SelfUpdate(ctx context.Context) error {
+// fetchLatestRelease tries stable release first, falls back to pre-releases
+func fetchLatestRelease() (*GithubRelease, error) {
+	// Try stable release first
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
 	resp, err := http.Get(url)
 	if err != nil {
-		return fmt.Errorf("fetch release info: %w", err)
+		return nil, fmt.Errorf("check for updates: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var release GithubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return fmt.Errorf("parse release: %w", err)
+	if resp.StatusCode == 200 {
+		var release GithubRelease
+		if err := json.NewDecoder(resp.Body).Decode(&release); err == nil && release.TagName != "" {
+			return &release, nil
+		}
+	}
+
+	// Fall back to all releases (includes pre-releases)
+	url = fmt.Sprintf("https://api.github.com/repos/%s/releases", githubRepo)
+	resp2, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("check for updates: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	var releases []GithubRelease
+	if err := json.NewDecoder(resp2.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("parse releases: %w", err)
+	}
+
+	if len(releases) == 0 {
+		return nil, fmt.Errorf("no releases found")
+	}
+
+	return &releases[0], nil
+}
+
+func (e *Engine) SelfUpdate(ctx context.Context) error {
+	release, err := fetchLatestRelease()
+	if err != nil {
+		return err
 	}
 
 	// Find tarball for current OS/arch (goreleaser format: apod_linux_amd64.tar.gz)
