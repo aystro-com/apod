@@ -163,6 +163,14 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		"site_db_user": dbUser,
 		"site_db_pass": dbPass,
 	}
+	// Add driver parameter defaults to vars
+	for key, param := range driver.Parameters {
+		if val, ok := opts.Params[key]; ok {
+			vars[key] = val
+		} else if param.Default != "" {
+			vars[key] = param.Default
+		}
+	}
 	ExpandDriverVariables(driver, vars)
 
 	if err := e.traefik.EnsureRunning(ctx); err != nil {
