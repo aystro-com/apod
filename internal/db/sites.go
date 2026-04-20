@@ -9,9 +9,9 @@ import (
 
 func (d *DB) CreateSite(site *models.Site) error {
 	result, err := d.conn.Exec(
-		`INSERT INTO sites (domain, driver, status, ram, cpu, env, repo, branch, owner)
-		 VALUES (?, ?, 'creating', ?, ?, '{}', ?, ?, ?)`,
-		site.Domain, site.Driver, site.RAM, site.CPU, site.Repo, site.Branch, site.Owner,
+		`INSERT INTO sites (domain, driver, status, ram, cpu, storage, env, repo, branch, owner)
+		 VALUES (?, ?, 'creating', ?, ?, ?, '{}', ?, ?, ?)`,
+		site.Domain, site.Driver, site.RAM, site.CPU, site.Storage, site.Repo, site.Branch, site.Owner,
 	)
 	if err != nil {
 		return fmt.Errorf("insert site: %w", err)
@@ -24,9 +24,9 @@ func (d *DB) CreateSite(site *models.Site) error {
 func (d *DB) GetSite(domain string) (*models.Site, error) {
 	site := &models.Site{}
 	err := d.conn.QueryRow(
-		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, owner, created_at, updated_at
+		`SELECT id, domain, driver, status, ram, cpu, storage, env, repo, branch, owner, created_at, updated_at
 		 FROM sites WHERE domain = ?`, domain,
-	).Scan(&site.ID, &site.Domain, &site.Driver, &site.Status, &site.RAM, &site.CPU,
+	).Scan(&site.ID, &site.Domain, &site.Driver, &site.Status, &site.RAM, &site.CPU, &site.Storage,
 		&site.Env, &site.Repo, &site.Branch, &site.Owner, &site.CreatedAt, &site.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("site %q not found", domain)
@@ -39,7 +39,7 @@ func (d *DB) GetSite(domain string) (*models.Site, error) {
 
 func (d *DB) ListSites() ([]models.Site, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, owner, created_at, updated_at
+		`SELECT id, domain, driver, status, ram, cpu, storage, env, repo, branch, owner, created_at, updated_at
 		 FROM sites ORDER BY domain`,
 	)
 	if err != nil {
@@ -50,7 +50,7 @@ func (d *DB) ListSites() ([]models.Site, error) {
 	var sites []models.Site
 	for rows.Next() {
 		var s models.Site
-		if err := rows.Scan(&s.ID, &s.Domain, &s.Driver, &s.Status, &s.RAM, &s.CPU,
+		if err := rows.Scan(&s.ID, &s.Domain, &s.Driver, &s.Status, &s.RAM, &s.CPU, &s.Storage,
 			&s.Env, &s.Repo, &s.Branch, &s.Owner, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan site: %w", err)
 		}
@@ -61,7 +61,7 @@ func (d *DB) ListSites() ([]models.Site, error) {
 
 func (d *DB) ListSitesByOwner(owner string) ([]models.Site, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, owner, created_at, updated_at
+		`SELECT id, domain, driver, status, ram, cpu, storage, env, repo, branch, owner, created_at, updated_at
 		 FROM sites WHERE owner = ? ORDER BY domain`, owner,
 	)
 	if err != nil {
@@ -72,7 +72,7 @@ func (d *DB) ListSitesByOwner(owner string) ([]models.Site, error) {
 	var sites []models.Site
 	for rows.Next() {
 		var s models.Site
-		if err := rows.Scan(&s.ID, &s.Domain, &s.Driver, &s.Status, &s.RAM, &s.CPU,
+		if err := rows.Scan(&s.ID, &s.Domain, &s.Driver, &s.Status, &s.RAM, &s.CPU, &s.Storage,
 			&s.Env, &s.Repo, &s.Branch, &s.Owner, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan site: %w", err)
 		}
@@ -104,6 +104,8 @@ func (d *DB) UpdateSiteConfig(domain string, fields map[string]string) error {
 			query = `UPDATE sites SET ram = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
 		case "cpu":
 			query = `UPDATE sites SET cpu = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
+		case "storage":
+			query = `UPDATE sites SET storage = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
 		case "env":
 			query = `UPDATE sites SET env = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
 		case "repo":

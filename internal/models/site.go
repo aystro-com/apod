@@ -9,6 +9,7 @@ type Site struct {
 	Status    string    `json:"status"`
 	RAM       string    `json:"ram"`
 	CPU       string    `json:"cpu"`
+	Storage   string    `json:"storage,omitempty"`
 	Env       string    `json:"env"`
 	Repo      string    `json:"repo,omitempty"`
 	Branch    string    `json:"branch,omitempty"`

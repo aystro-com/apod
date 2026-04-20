@@ -153,6 +153,7 @@ var migrations = []struct {
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`},
 	{19, `ALTER TABLE sites ADD COLUMN owner TEXT NOT NULL DEFAULT ''`},
+	{20, `ALTER TABLE sites ADD COLUMN storage TEXT NOT NULL DEFAULT '0'`},
 }
 
 func (d *DB) migrate() error {

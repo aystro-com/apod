@@ -8,12 +8,13 @@ import (
 )
 
 var (
-	flagDriver string
-	flagRAM    string
-	flagCPU    string
-	flagRepo   string
-	flagBranch string
-	flagDeploy bool
+	flagDriver  string
+	flagRAM     string
+	flagCPU     string
+	flagStorage string
+	flagRepo    string
+	flagBranch  string
+	flagDeploy  bool
 )
 
 var createCmd = &cobra.Command{
@@ -25,12 +26,13 @@ var createCmd = &cobra.Command{
 		domain := args[0]
 
 		body := map[string]interface{}{
-			"domain": domain,
-			"driver": flagDriver,
-			"ram":    flagRAM,
-			"cpu":    flagCPU,
-			"repo":   flagRepo,
-			"branch": flagBranch,
+			"domain":  domain,
+			"driver":  flagDriver,
+			"ram":     flagRAM,
+			"cpu":     flagCPU,
+			"storage": flagStorage,
+			"repo":    flagRepo,
+			"branch":  flagBranch,
 		}
 
 		resp, err := client.Post("/api/v1/sites", body)
@@ -61,6 +63,7 @@ func init() {
 	createCmd.Flags().StringVar(&flagDriver, "driver", "", "Driver to use (required)")
 	createCmd.Flags().StringVar(&flagRAM, "ram", "256M", "Memory limit")
 	createCmd.Flags().StringVar(&flagCPU, "cpu", "1", "CPU limit")
+	createCmd.Flags().StringVar(&flagStorage, "storage", "0", "Disk storage limit (e.g., 5G, 500M)")
 	createCmd.Flags().StringVar(&flagRepo, "repo", "", "Git repository URL")
 	createCmd.Flags().StringVar(&flagBranch, "branch", "main", "Git branch")
 	createCmd.Flags().BoolVar(&flagDeploy, "deploy", false, "Deploy immediately after creation")

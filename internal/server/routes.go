@@ -36,13 +36,14 @@ func respondError(w http.ResponseWriter, status int, msg string) {
 
 func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Domain string            `json:"domain"`
-		Driver string            `json:"driver"`
-		RAM    string            `json:"ram"`
-		CPU    string            `json:"cpu"`
-		Repo   string            `json:"repo"`
-		Branch string            `json:"branch"`
-		Params map[string]string `json:"params"`
+		Domain  string            `json:"domain"`
+		Driver  string            `json:"driver"`
+		RAM     string            `json:"ram"`
+		CPU     string            `json:"cpu"`
+		Storage string            `json:"storage"`
+		Repo    string            `json:"repo"`
+		Branch  string            `json:"branch"`
+		Params  map[string]string `json:"params"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -63,14 +64,15 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := h.engine.CreateSite(r.Context(), engine.CreateSiteOpts{
-		Domain: req.Domain,
-		Driver: req.Driver,
-		RAM:    req.RAM,
-		CPU:    req.CPU,
-		Repo:   req.Repo,
-		Branch: req.Branch,
-		Params: req.Params,
-		Owner:  owner,
+		Domain:  req.Domain,
+		Driver:  req.Driver,
+		RAM:     req.RAM,
+		CPU:     req.CPU,
+		Storage: req.Storage,
+		Repo:    req.Repo,
+		Branch:  req.Branch,
+		Params:  req.Params,
+		Owner:   owner,
 	})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())

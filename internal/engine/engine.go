@@ -105,14 +105,15 @@ func (e *Engine) Close() {
 }
 
 type CreateSiteOpts struct {
-	Domain string
-	Driver string
-	RAM    string
-	CPU    string
-	Repo   string
-	Branch string
-	Params map[string]string
-	Owner  string
+	Domain  string
+	Driver  string
+	RAM     string
+	CPU     string
+	Storage string
+	Repo    string
+	Branch  string
+	Params  map[string]string
+	Owner   string
 }
 
 func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
@@ -127,13 +128,14 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	}
 
 	site := &models.Site{
-		Domain: opts.Domain,
-		Driver: opts.Driver,
-		RAM:    opts.RAM,
-		CPU:    opts.CPU,
-		Repo:   opts.Repo,
-		Branch: opts.Branch,
-		Owner:  opts.Owner,
+		Domain:  opts.Domain,
+		Driver:  opts.Driver,
+		RAM:     opts.RAM,
+		CPU:     opts.CPU,
+		Storage: opts.Storage,
+		Repo:    opts.Repo,
+		Branch:  opts.Branch,
+		Owner:   opts.Owner,
 	}
 	if site.RAM == "" {
 		site.RAM = "256M"
@@ -295,6 +297,11 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	// Register primary domain
 	if createdSite, err := e.db.GetSite(opts.Domain); err == nil {
 		e.db.AddDomain(createdSite.ID, opts.Domain, true)
+	}
+
+	// Apply disk quota for the user
+	if opts.Owner != "" && opts.Storage != "" && opts.Storage != "0" {
+		e.ApplyDiskQuota(ctx, opts.Owner)
 	}
 
 	return nil
