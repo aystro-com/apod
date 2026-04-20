@@ -156,6 +156,18 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		return fmt.Errorf("create data root: %w", err)
 	}
 
+	// Set ownership for user-owned sites
+	if opts.Owner != "" {
+		if user, err := e.db.GetUserByName(opts.Owner); err == nil {
+			uid := user.UID
+			// Own the site dir, files, and data dirs
+			siteDir := filepath.Dir(siteRoot)
+			os.Chown(siteDir, uid, uid)
+			os.Chown(siteRoot, uid, uid)
+			os.Chown(dataRoot, uid, uid)
+		}
+	}
+
 	// Clone git repo if provided
 	if opts.Repo != "" {
 		branch := opts.Branch
