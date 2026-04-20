@@ -1,0 +1,101 @@
+name: paymenter
+version: "1.0"
+description: Paymenter billing panel (Laravel + MariaDB + Redis)
+
+parameters:
+  php_version:
+    type: string
+    default: "8.3"
+    options: ["8.3", "8.4"]
+
+services:
+  app:
+    image: "webdevops/php-nginx-dev:${php_version}"
+    volumes:
+      - "${site_root}:/app"
+    ports:
+      - "80"
+    environment:
+      WEB_DOCUMENT_ROOT: "/app/public"
+      PHP_MEMORY_LIMIT: "512M"
+      DB_CONNECTION: "mysql"
+      DB_HOST: "apod-${site_domain}-db"
+      DB_PORT: "3306"
+      DB_DATABASE: "${site_db_name}"
+      DB_USERNAME: "${site_db_user}"
+      DB_PASSWORD: "${site_db_pass}"
+      REDIS_HOST: "apod-${site_domain}-redis"
+      REDIS_PORT: "6379"
+      CACHE_DRIVER: "redis"
+      SESSION_DRIVER: "redis"
+      QUEUE_CONNECTION: "redis"
+      APP_URL: "https://${site_domain}"
+      APP_ENV: "production"
+
+  db:
+    image: "mariadb:10.11"
+    environment:
+      MYSQL_DATABASE: "${site_db_name}"
+      MYSQL_USER: "${site_db_user}"
+      MYSQL_PASSWORD: "${site_db_pass}"
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - "${data_root}/mysql:/var/lib/mysql"
+
+  redis:
+    image: "redis:7-alpine"
+    volumes:
+      - "${data_root}/redis:/data"
+
+deploy:
+  before_deploy:
+    - "cd /app && composer install --no-dev --optimize-autoloader --no-interaction"
+  after_deploy:
+    - "cd /app && php artisan migrate --force"
+    - "cd /app && php artisan optimize"
+
+healthcheck:
+  url: "http://localhost:80"
+  interval: 10s
+  timeout: 5s
+  retries: 5
+
+backup:
+  paths:
+    - "${site_root}"
+  databases:
+    - type: mysql
+      service: db
+
+setup:
+  - name: "Wait for database"
+    command: "sleep 10 && mysqladmin ping -h apod-${site_domain}-db --wait=30 2>/dev/null || sleep 5"
+    service: app
+  - name: "Wait for Redis"
+    command: "redis-cli -h apod-${site_domain}-redis ping 2>/dev/null || sleep 5"
+    service: app
+  - name: "Download Paymenter"
+    command: "cd /app && if [ ! -f artisan ]; then curl -Lo paymenter.tar.gz https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz && tar -xzf paymenter.tar.gz && rm paymenter.tar.gz; fi"
+    service: app
+  - name: "Fix permissions"
+    command: "cd /app && chmod -R 755 storage bootstrap/cache"
+    service: app
+    user: root
+  - name: "Generate .env"
+    command: "cd /app && if [ ! -f .env ]; then cp .env.example .env; fi"
+    service: app
+  - name: "Install dependencies"
+    command: "cd /app && composer install --no-dev --optimize-autoloader --no-interaction"
+    service: app
+  - name: "Generate app key"
+    command: "cd /app && if ! grep -q 'APP_KEY=base64' .env; then php artisan key:generate --force; fi"
+    service: app
+  - name: "Run migrations"
+    command: "cd /app && php artisan migrate --force --seed 2>/dev/null || php artisan migrate --force"
+    service: app
+  - name: "Create storage link"
+    command: "cd /app && php artisan storage:link 2>/dev/null || true"
+    service: app
+  - name: "Optimize"
+    command: "cd /app && php artisan optimize 2>/dev/null || true"
+    service: app
