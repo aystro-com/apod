@@ -1,0 +1,12 @@
+# AI tools
+.claude/
+.cursor/
+.copilot/
+.aider*
+.codeium/
+
+# Markdown files
+*.md
+
+# Superpowers plans/specs
+docs/superpowers/
