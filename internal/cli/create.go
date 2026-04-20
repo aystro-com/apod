@@ -13,6 +13,7 @@ var (
 	flagCPU    string
 	flagRepo   string
 	flagBranch string
+	flagDeploy bool
 )
 
 var createCmd = &cobra.Command{
@@ -40,6 +41,18 @@ var createCmd = &cobra.Command{
 		var site map[string]interface{}
 		json.Unmarshal(resp.Data, &site)
 		fmt.Printf("Site %s created successfully\n", domain)
+
+		// Auto-deploy if --deploy flag or repo was provided
+		if flagDeploy || flagRepo != "" {
+			fmt.Printf("Deploying %s...\n", domain)
+			deployBody := map[string]string{"branch": flagBranch}
+			_, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/deploy", domain), deployBody)
+			if err != nil {
+				return fmt.Errorf("deploy: %w", err)
+			}
+			fmt.Printf("Site %s deployed successfully\n", domain)
+		}
+
 		return nil
 	},
 }
@@ -50,6 +63,7 @@ func init() {
 	createCmd.Flags().StringVar(&flagCPU, "cpu", "1", "CPU limit")
 	createCmd.Flags().StringVar(&flagRepo, "repo", "", "Git repository URL")
 	createCmd.Flags().StringVar(&flagBranch, "branch", "main", "Git branch")
+	createCmd.Flags().BoolVar(&flagDeploy, "deploy", false, "Deploy immediately after creation")
 	createCmd.MarkFlagRequired("driver")
 	rootCmd.AddCommand(createCmd)
 }
