@@ -215,6 +215,12 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	}
 
 	e.db.UpdateSiteStatus(opts.Domain, "running")
+
+	// Register primary domain
+	if createdSite, err := e.db.GetSite(opts.Domain); err == nil {
+		e.db.AddDomain(createdSite.ID, opts.Domain, true)
+	}
+
 	return nil
 }
 
