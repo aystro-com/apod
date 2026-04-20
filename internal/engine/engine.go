@@ -202,6 +202,10 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 			parts := strings.SplitN(v, ":", 2)
 			if len(parts) == 2 {
 				volumes[parts[0]] = parts[1]
+				// Create host directory for bind mounts
+				if strings.HasPrefix(parts[0], "/") {
+					os.MkdirAll(parts[0], 0755)
+				}
 			}
 		}
 
