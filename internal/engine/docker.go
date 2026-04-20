@@ -60,6 +60,7 @@ type ContainerConfig struct {
 	Command     string
 	Args        []string // raw args passed directly (not through sh -c)
 	Ports       map[string]string // container_port -> host_port
+	User        string // UID:GID to run container as (e.g., "5001:5001")
 }
 
 func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (string, error) {
@@ -116,6 +117,7 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 			Labels:       cfg.Labels,
 			Cmd:          cmd,
 			ExposedPorts: exposedPorts,
+			User:         cfg.User,
 		},
 		&container.HostConfig{
 			Mounts:        mounts,

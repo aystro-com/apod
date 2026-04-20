@@ -28,6 +28,8 @@ func New(e *engine.Engine) *Server {
 	r.Use(LoggingMiddleware)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(AuthMiddleware(e))
+
 		r.Post("/sites", h.CreateSite)
 		r.Get("/sites", h.ListSites)
 		r.Get("/sites/{domain}", h.GetSite)
@@ -102,10 +104,6 @@ func New(e *engine.Engine) *Server {
 		r.Get("/sites/{domain}/db/export", h.DBExportHandler)
 		r.Post("/sites/{domain}/db/import", h.DBImportHandler)
 
-		// Server stats
-		r.Get("/server-stats", h.ServerStatsHandler)
-		r.Get("/disk-usage", h.DiskUsageHandler)
-
 		// Cron jobs
 		r.Post("/sites/{domain}/cron", h.AddCronJobHandler)
 		r.Get("/sites/{domain}/cron", h.ListCronJobsHandler)
@@ -126,22 +124,37 @@ func New(e *engine.Engine) *Server {
 		r.Get("/sites/{domain}/ftp", h.ListFTPAccountsHandler)
 		r.Delete("/sites/{domain}/ftp/{username}", h.RemoveFTPAccountHandler)
 
-		// Firewall
-		r.Get("/firewall", h.FirewallStatusHandler)
-		r.Post("/firewall/enable", h.FirewallEnableHandler)
-		r.Post("/firewall/allow", h.FirewallAllowHandler)
-		r.Post("/firewall/deny", h.FirewallDenyHandler)
+		// Admin-only routes
+		r.Group(func(r chi.Router) {
+			r.Use(AdminOnlyMiddleware)
 
-		// SSH Keys
-		r.Post("/ssh-keys", h.AddSSHKeyHandler)
-		r.Get("/ssh-keys", h.ListSSHKeysHandler)
-		r.Delete("/ssh-keys/{name}", h.RemoveSSHKeyHandler)
+			// Firewall
+			r.Get("/firewall", h.FirewallStatusHandler)
+			r.Post("/firewall/enable", h.FirewallEnableHandler)
+			r.Post("/firewall/allow", h.FirewallAllowHandler)
+			r.Post("/firewall/deny", h.FirewallDenyHandler)
 
-		// System
-		r.Get("/version", h.VersionHandler)
-		r.Get("/update/check", h.CheckUpdateHandler)
-		r.Post("/update", h.UpdateHandler)
-		r.Post("/update/drivers", h.UpdateDriversHandler)
+			// SSH Keys
+			r.Post("/ssh-keys", h.AddSSHKeyHandler)
+			r.Get("/ssh-keys", h.ListSSHKeysHandler)
+			r.Delete("/ssh-keys/{name}", h.RemoveSSHKeyHandler)
+
+			// System
+			r.Get("/version", h.VersionHandler)
+			r.Get("/update/check", h.CheckUpdateHandler)
+			r.Post("/update", h.UpdateHandler)
+			r.Post("/update/drivers", h.UpdateDriversHandler)
+
+			// Server stats
+			r.Get("/server-stats", h.ServerStatsHandler)
+			r.Get("/disk-usage", h.DiskUsageHandler)
+
+			// User management
+			r.Post("/users", h.CreateUserHandler)
+			r.Get("/users", h.ListUsersHandler)
+			r.Delete("/users/{name}", h.DeleteUserHandler)
+			r.Post("/users/{name}/reset-key", h.ResetAPIKeyHandler)
+		})
 	})
 
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)
@@ -169,11 +182,13 @@ func (s *Server) ListenSocket(socketPath string) error {
 	os.Chmod(socketPath, 0660)
 
 	log.Printf("apod daemon listening on %s", socketPath)
-	return http.Serve(listener, s.router)
+	// Unix socket connections get admin access (marked by UnixSocketMiddleware)
+	handler := UnixSocketMiddleware(s.router)
+	return http.Serve(listener, handler)
 }
 
 func (s *Server) ListenTCP(addr string) error {
-	log.Printf("apod daemon listening on %s", addr)
+	log.Printf("apod daemon listening on %s (TCP, auth required)", addr)
 	return http.ListenAndServe(addr, s.router)
 }
 

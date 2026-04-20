@@ -12,6 +12,7 @@ type Site struct {
 	Env       string    `json:"env"`
 	Repo      string    `json:"repo,omitempty"`
 	Branch    string    `json:"branch,omitempty"`
+	Owner     string    `json:"owner,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

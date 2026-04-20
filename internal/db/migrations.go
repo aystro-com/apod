@@ -144,6 +144,15 @@ var migrations = []struct {
 		public_key TEXT NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`},
+	{18, `CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		uid INTEGER NOT NULL UNIQUE,
+		role TEXT NOT NULL DEFAULT 'user',
+		api_key_hash TEXT NOT NULL UNIQUE,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`},
+	{19, `ALTER TABLE sites ADD COLUMN owner TEXT NOT NULL DEFAULT ''`},
 }
 
 func (d *DB) migrate() error {

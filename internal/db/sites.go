@@ -9,9 +9,9 @@ import (
 
 func (d *DB) CreateSite(site *models.Site) error {
 	result, err := d.conn.Exec(
-		`INSERT INTO sites (domain, driver, status, ram, cpu, env, repo, branch)
-		 VALUES (?, ?, 'creating', ?, ?, '{}', ?, ?)`,
-		site.Domain, site.Driver, site.RAM, site.CPU, site.Repo, site.Branch,
+		`INSERT INTO sites (domain, driver, status, ram, cpu, env, repo, branch, owner)
+		 VALUES (?, ?, 'creating', ?, ?, '{}', ?, ?, ?)`,
+		site.Domain, site.Driver, site.RAM, site.CPU, site.Repo, site.Branch, site.Owner,
 	)
 	if err != nil {
 		return fmt.Errorf("insert site: %w", err)
@@ -24,10 +24,10 @@ func (d *DB) CreateSite(site *models.Site) error {
 func (d *DB) GetSite(domain string) (*models.Site, error) {
 	site := &models.Site{}
 	err := d.conn.QueryRow(
-		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, created_at, updated_at
+		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, owner, created_at, updated_at
 		 FROM sites WHERE domain = ?`, domain,
 	).Scan(&site.ID, &site.Domain, &site.Driver, &site.Status, &site.RAM, &site.CPU,
-		&site.Env, &site.Repo, &site.Branch, &site.CreatedAt, &site.UpdatedAt)
+		&site.Env, &site.Repo, &site.Branch, &site.Owner, &site.CreatedAt, &site.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("site %q not found", domain)
 	}
@@ -39,7 +39,7 @@ func (d *DB) GetSite(domain string) (*models.Site, error) {
 
 func (d *DB) ListSites() ([]models.Site, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, created_at, updated_at
+		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, owner, created_at, updated_at
 		 FROM sites ORDER BY domain`,
 	)
 	if err != nil {
@@ -51,7 +51,29 @@ func (d *DB) ListSites() ([]models.Site, error) {
 	for rows.Next() {
 		var s models.Site
 		if err := rows.Scan(&s.ID, &s.Domain, &s.Driver, &s.Status, &s.RAM, &s.CPU,
-			&s.Env, &s.Repo, &s.Branch, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			&s.Env, &s.Repo, &s.Branch, &s.Owner, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan site: %w", err)
+		}
+		sites = append(sites, s)
+	}
+	return sites, nil
+}
+
+func (d *DB) ListSitesByOwner(owner string) ([]models.Site, error) {
+	rows, err := d.conn.Query(
+		`SELECT id, domain, driver, status, ram, cpu, env, repo, branch, owner, created_at, updated_at
+		 FROM sites WHERE owner = ? ORDER BY domain`, owner,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query sites: %w", err)
+	}
+	defer rows.Close()
+
+	var sites []models.Site
+	for rows.Next() {
+		var s models.Site
+		if err := rows.Scan(&s.ID, &s.Domain, &s.Driver, &s.Status, &s.RAM, &s.CPU,
+			&s.Env, &s.Repo, &s.Branch, &s.Owner, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan site: %w", err)
 		}
 		sites = append(sites, s)

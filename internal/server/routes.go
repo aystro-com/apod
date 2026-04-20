@@ -55,6 +55,13 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set owner to authenticated user (unless admin specifying another owner)
+	user := UserFromContext(r.Context())
+	owner := ""
+	if user != nil && user.Role != "admin" {
+		owner = user.Name
+	}
+
 	err := h.engine.CreateSite(r.Context(), engine.CreateSiteOpts{
 		Domain: req.Domain,
 		Driver: req.Driver,
@@ -63,6 +70,7 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		Repo:   req.Repo,
 		Branch: req.Branch,
 		Params: req.Params,
+		Owner:  owner,
 	})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -74,7 +82,15 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {
-	sites, err := h.engine.ListSites(r.Context())
+	user := UserFromContext(r.Context())
+	var sites interface{}
+	var err error
+
+	if user != nil && user.Role != "admin" {
+		sites, err = h.engine.ListSitesByOwner(r.Context(), user.Name)
+	} else {
+		sites, err = h.engine.ListSites(r.Context())
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -82,8 +98,29 @@ func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, sites)
 }
 
+// checkSiteAccess verifies the current user can access the given domain
+func (h *Handler) checkSiteAccess(w http.ResponseWriter, r *http.Request, domain string) bool {
+	user := UserFromContext(r.Context())
+	if user == nil || user.Role == "admin" {
+		return true
+	}
+	site, err := h.engine.GetSite(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return false
+	}
+	if site.Owner != user.Name {
+		respondError(w, http.StatusForbidden, "access denied")
+		return false
+	}
+	return true
+}
+
 func (h *Handler) GetSite(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	site, err := h.engine.GetSite(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
@@ -903,4 +940,63 @@ func (h *Handler) UpdateDriversHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"updated": updated})
+}
+
+// User management handlers
+
+func (h *Handler) CreateUserHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		respondError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if req.Role == "" {
+		req.Role = "user"
+	}
+
+	user, rawKey, err := h.engine.CreateUser(r.Context(), req.Name, req.Role)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]interface{}{
+		"user":    user,
+		"api_key": rawKey,
+	})
+}
+
+func (h *Handler) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
+	users, err := h.engine.ListUsers(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, users)
+}
+
+func (h *Handler) DeleteUserHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := h.engine.DeleteUser(r.Context(), name); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) ResetAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	rawKey, err := h.engine.ResetAPIKey(r.Context(), name)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"api_key": rawKey})
 }

@@ -112,6 +112,7 @@ type CreateSiteOpts struct {
 	Repo   string
 	Branch string
 	Params map[string]string
+	Owner  string
 }
 
 func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
@@ -132,6 +133,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		CPU:    opts.CPU,
 		Repo:   opts.Repo,
 		Branch: opts.Branch,
+		Owner:  opts.Owner,
 	}
 	if site.RAM == "" {
 		site.RAM = "256M"
@@ -144,8 +146,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		return fmt.Errorf("create site record: %w", err)
 	}
 
-	siteRoot := filepath.Join(e.dataDir, "sites", opts.Domain, "files")
-	dataRoot := filepath.Join(e.dataDir, "sites", opts.Domain, "data")
+	siteRoot, dataRoot := e.SiteDir(opts.Owner, opts.Domain)
 	if err := os.MkdirAll(siteRoot, 0755); err != nil {
 		return fmt.Errorf("create site root: %w", err)
 	}
@@ -380,6 +381,10 @@ func (e *Engine) RestartSite(ctx context.Context, domain string) error {
 
 func (e *Engine) ListSites(ctx context.Context) ([]models.Site, error) {
 	return e.db.ListSites()
+}
+
+func (e *Engine) ListSitesByOwner(ctx context.Context, owner string) ([]models.Site, error) {
+	return e.db.ListSitesByOwner(owner)
 }
 
 func (e *Engine) GetSite(ctx context.Context, domain string) (*models.Site, error) {
