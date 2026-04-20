@@ -1,0 +1,50 @@
+name: wordpress
+version: "1.0"
+description: WordPress with PHP-FPM and MySQL
+
+parameters:
+  php_version:
+    type: string
+    default: "8.3"
+    options: ["8.1", "8.2", "8.3", "8.4"]
+
+services:
+  app:
+    image: "wordpress:php${php_version}-fpm"
+    volumes:
+      - "${site_root}:/var/www/html"
+    ports:
+      - "80"
+    environment:
+      WORDPRESS_DB_HOST: "apod-${site_domain}-db"
+      WORDPRESS_DB_NAME: "${site_db_name}"
+      WORDPRESS_DB_USER: "${site_db_user}"
+      WORDPRESS_DB_PASSWORD: "${site_db_pass}"
+
+  db:
+    image: "mysql:8.0"
+    environment:
+      MYSQL_DATABASE: "${site_db_name}"
+      MYSQL_USER: "${site_db_user}"
+      MYSQL_PASSWORD: "${site_db_pass}"
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - "${data_root}/mysql:/var/lib/mysql"
+
+healthcheck:
+  url: "http://localhost:80"
+  interval: 10s
+  timeout: 5s
+  retries: 3
+
+backup:
+  paths:
+    - "${site_root}"
+  databases:
+    - type: mysql
+      service: db
+
+setup:
+  - name: "Wait for database"
+    command: "mysqladmin ping -h apod-${site_domain}-db --wait=30"
+    service: app
