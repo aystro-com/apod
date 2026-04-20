@@ -79,6 +79,23 @@ var migrations = []string{
 		active INTEGER NOT NULL DEFAULT 1,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`CREATE TABLE IF NOT EXISTS uptime_checks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_domain TEXT NOT NULL UNIQUE,
+		url TEXT NOT NULL,
+		interval_seconds INTEGER NOT NULL DEFAULT 60,
+		alert_webhook TEXT NOT NULL DEFAULT '',
+		active INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS uptime_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_domain TEXT NOT NULL,
+		status_code INTEGER NOT NULL,
+		response_ms INTEGER NOT NULL,
+		is_up INTEGER NOT NULL DEFAULT 1,
+		checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
 }
 
 func (d *DB) migrate() error {
