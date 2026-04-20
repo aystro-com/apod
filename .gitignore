@@ -8,5 +8,9 @@
 # Binary
 apod
 
+# Markdown (except README)
+*.md
+!README.md
+
 # Superpowers internal
 docs/superpowers/
