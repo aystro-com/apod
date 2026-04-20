@@ -101,6 +101,15 @@ func New(e *engine.Engine) *Server {
 		// Database
 		r.Get("/sites/{domain}/db/export", h.DBExportHandler)
 		r.Post("/sites/{domain}/db/import", h.DBImportHandler)
+
+		// Server stats
+		r.Get("/server-stats", h.ServerStatsHandler)
+		r.Get("/disk-usage", h.DiskUsageHandler)
+
+		// Cron jobs
+		r.Post("/sites/{domain}/cron", h.AddCronJobHandler)
+		r.Get("/sites/{domain}/cron", h.ListCronJobsHandler)
+		r.Delete("/sites/{domain}/cron", h.RemoveCronJobHandler)
 	})
 
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)

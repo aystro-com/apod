@@ -502,6 +502,72 @@ func (h *Handler) DBImportHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "imported"})
 }
 
+func (h *Handler) ServerStatsHandler(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.engine.GetServerStats(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, stats)
+}
+
+func (h *Handler) DiskUsageHandler(w http.ResponseWriter, r *http.Request) {
+	usage, err := h.engine.GetDiskUsage(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, usage)
+}
+
+func (h *Handler) AddCronJobHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Schedule string `json:"schedule"`
+		Command  string `json:"command"`
+		Service  string `json:"service"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Schedule == "" || req.Command == "" {
+		respondError(w, http.StatusBadRequest, "schedule and command are required")
+		return
+	}
+	id, err := h.engine.AddCronJob(r.Context(), domain, req.Schedule, req.Command, req.Service)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]int64{"cron_id": id})
+}
+
+func (h *Handler) ListCronJobsHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	jobs, err := h.engine.ListCronJobs(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, jobs)
+}
+
+func (h *Handler) RemoveCronJobHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.RemoveCronJob(r.Context(), req.ID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
 func (h *Handler) IncomingWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	if err := h.engine.HandleWebhook(r.Context(), token); err != nil {
