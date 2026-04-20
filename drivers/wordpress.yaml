@@ -1,6 +1,6 @@
 name: wordpress
 version: "1.0"
-description: WordPress with PHP-FPM and MySQL
+description: WordPress with Apache and MySQL
 
 parameters:
   php_version:
@@ -10,7 +10,7 @@ parameters:
 
 services:
   app:
-    image: "wordpress:php${php_version}-fpm"
+    image: "wordpress:php${php_version}-apache"
     volumes:
       - "${site_root}:/var/www/html"
     ports:

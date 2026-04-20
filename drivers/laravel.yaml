@@ -1,6 +1,6 @@
 name: laravel
 version: "1.0"
-description: Laravel application with PHP-FPM and MySQL
+description: Laravel application with Nginx, PHP-FPM and MySQL
 
 parameters:
   php_version:
@@ -10,12 +10,13 @@ parameters:
 
 services:
   app:
-    image: "php:${php_version}-fpm"
+    image: "webdevops/php-nginx:${php_version}"
     volumes:
-      - "${site_root}:/var/www/html"
+      - "${site_root}:/app"
     ports:
       - "80"
     environment:
+      WEB_DOCUMENT_ROOT: "/app/public"
       DB_HOST: "apod-${site_domain}-db"
       DB_DATABASE: "${site_db_name}"
       DB_USERNAME: "${site_db_user}"

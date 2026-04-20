@@ -8,7 +8,7 @@ import (
 
 const (
 	traefikContainerName = "apod-traefik"
-	traefikImage         = "traefik:v3.0"
+	traefikImage         = "traefik:v2.11"
 	apodNetwork          = "apod-net"
 )
 
