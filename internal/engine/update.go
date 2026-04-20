@@ -12,8 +12,9 @@ import (
 	"runtime"
 )
 
+var Version = "dev"
+
 const (
-	Version       = "1.0.0"
 	githubRepo    = "aystro-com/apod"
 	driverRepoURL = "https://raw.githubusercontent.com/aystro-com/apod/master/drivers/"
 )
