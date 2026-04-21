@@ -27,10 +27,10 @@ function apod_ConfigOptions()
 {
     return [
         'Driver' => [
-            'Type' => 'dropdown',
-            'Options' => 'php,laravel,wordpress,node,static,odoo,unifi,paymenter',
-            'Description' => 'Application driver',
+            'Type' => 'text',
+            'Size' => '20',
             'Default' => 'php',
+            'Description' => 'Driver name (use Test Connection to see available drivers)',
         ],
         'RAM' => [
             'Type' => 'text',
@@ -131,7 +131,16 @@ function apod_TestConnection(array $params)
         return ['success' => false, 'error' => $response['error']];
     }
 
-    return ['success' => true, 'error' => ''];
+    // Also fetch available drivers for reference
+    $drivers = apod_request($params, '/drivers', 'GET');
+    $driverList = '';
+    if (!$drivers['error'] && is_array($drivers['data'])) {
+        $names = array_map(function ($d) { return $d['name']; }, $drivers['data']);
+        $driverList = ' | Available drivers: ' . implode(', ', $names);
+    }
+
+    $version = $drivers['data']['version'] ?? ($response['data']['version'] ?? 'connected');
+    return ['success' => true, 'error' => 'Connected to apod v' . $version . $driverList];
 }
 
 /**
