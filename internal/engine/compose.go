@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/aystro/apod/internal/models"
@@ -105,28 +104,36 @@ func discoverComposeServices(composeFile string) ([]string, error) {
 	return names, nil
 }
 
-// setupComposeCgroup creates a shared cgroup for all containers in a compose site.
-// All services share a single memory/PID pool instead of per-container limits.
-func setupComposeCgroup(project string, memoryMB int64, pidsLimit int64) (string, error) {
-	cgroupBase := "/sys/fs/cgroup/apod"
-	cgroupPath := filepath.Join(cgroupBase, project)
+// setupComposeCgroup creates a systemd slice for shared resource limits.
+// All containers in the compose site share a single memory/PID pool.
+func setupComposeCgroup(ctx context.Context, project string, memoryMB int64, pidsLimit int64) (string, error) {
+	sliceName := "apod-" + project + ".slice"
 
-	// Create cgroup hierarchy
-	os.MkdirAll(cgroupBase, 0755)
-	// Enable memory and pids controllers on the parent
-	os.WriteFile(filepath.Join(cgroupBase, "cgroup.subtree_control"), []byte("+memory +pids"), 0644)
-	os.MkdirAll(cgroupPath, 0755)
-
-	// Set shared limits — all containers in the pool compete for these
+	// Create a systemd transient slice with resource limits
+	args := []string{"systemd-run", "--unit=" + sliceName, "--scope", "--slice=" + sliceName}
 	if memoryMB > 0 {
-		memBytes := memoryMB * 1024 * 1024
-		os.WriteFile(filepath.Join(cgroupPath, "memory.max"), []byte(strconv.FormatInt(memBytes, 10)), 0644)
+		args = append(args, fmt.Sprintf("-p=MemoryMax=%dM", memoryMB))
 	}
 	if pidsLimit > 0 {
-		os.WriteFile(filepath.Join(cgroupPath, "pids.max"), []byte(strconv.FormatInt(pidsLimit, 10)), 0644)
+		args = append(args, fmt.Sprintf("-p=TasksMax=%d", pidsLimit))
+	}
+	args = append(args, "true") // just run true to create the slice
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.CombinedOutput() // best effort — slice may already exist
+
+	// Also create the slice file for persistence across reboots
+	sliceContent := fmt.Sprintf(`[Slice]
+MemoryMax=%dM
+TasksMax=%d
+`, memoryMB, pidsLimit)
+	slicePath := fmt.Sprintf("/etc/systemd/system/%s", sliceName)
+	if err := os.WriteFile(slicePath, []byte(sliceContent), 0644); err == nil {
+		exec.CommandContext(ctx, "systemctl", "daemon-reload").Run()
+		exec.CommandContext(ctx, "systemctl", "start", sliceName).Run()
 	}
 
-	return cgroupPath, nil
+	return sliceName, nil
 }
 
 // generateComposeOverride creates docker-compose.override.yml that adds apod
@@ -270,10 +277,10 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 	}
 	totalPids := int64(512) * int64(len(services)) // 512 per service as total pool
 
-	// Create shared cgroup — all containers compete for the same pool
+	// Create shared cgroup — all containers compete for the same memory/PID pool
 	cgroupParent := ""
-	if _, err := setupComposeCgroup(project, memoryMB, totalPids); err == nil {
-		cgroupParent = "apod/" + project
+	if sliceName, err := setupComposeCgroup(ctx, project, memoryMB, totalPids); err == nil {
+		cgroupParent = sliceName
 	}
 
 	if err := generateComposeOverride(compDir, opts.Domain, project, services, comp, cgroupParent); err != nil {
@@ -352,8 +359,10 @@ func (e *Engine) DestroyComposeSite(ctx context.Context, domain, owner string) e
 	// Remove Traefik routing config
 	os.Remove(filepath.Join("/etc/apod/traefik/dynamic", domain+".toml"))
 
-	// Remove shared cgroup
-	os.Remove(filepath.Join("/sys/fs/cgroup/apod", project))
+	// Remove shared cgroup slice
+	sliceName := "apod-" + project + ".slice"
+	exec.CommandContext(ctx, "systemctl", "stop", sliceName).Run()
+	os.Remove(fmt.Sprintf("/etc/systemd/system/%s", sliceName))
 
 	return nil
 }
