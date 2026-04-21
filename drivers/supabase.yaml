@@ -15,7 +15,6 @@ services:
     image: "supabase/postgres:15.8.1.085"
     volumes:
       - "${data_root}/postgres:/var/lib/postgresql/data"
-      - "${data_root}/kong/init-db.sh:/docker-entrypoint-initdb.d/99-init-roles.sh"
     environment:
       POSTGRES_PASSWORD: "${site_db_pass}"
       POSTGRES_DB: "postgres"
@@ -301,60 +300,6 @@ files:
               config:
                 hide_credentials: true
 
-  - path: "${data_root}/kong/init-db.sh"
-    content: |
-      #!/bin/bash
-      # Idempotent Supabase role/schema initialization
-      # The supabase/postgres image creates: supabase_admin, anon, authenticated,
-      # service_role, authenticator, supabase_realtime_admin, pgbouncer
-      # We need to create: supabase_auth_admin, supabase_storage_admin + schemas
-      export PGPASSWORD="${POSTGRES_PASSWORD}"
-      psql -h localhost -U supabase_admin -d postgres <<EOSQL
-        -- Create auth/storage admin roles (image does NOT create these)
-        DO \$\$BEGIN CREATE ROLE supabase_auth_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
-        DO \$\$BEGIN CREATE ROLE supabase_storage_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
-
-        -- Set passwords for all roles (image may set different defaults)
-        ALTER ROLE supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
-        ALTER ROLE supabase_storage_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
-        ALTER ROLE authenticator WITH PASSWORD '${POSTGRES_PASSWORD}';
-        ALTER ROLE supabase_realtime_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
-
-        -- Grant memberships
-        GRANT anon TO authenticator;
-        GRANT authenticated TO authenticator;
-        GRANT service_role TO authenticator;
-        GRANT supabase_admin TO authenticator;
-
-        -- Auth schema
-        CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
-        GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
-        GRANT CREATE ON SCHEMA auth TO supabase_auth_admin;
-
-        -- Storage schema
-        CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin;
-        GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
-        GRANT CREATE ON SCHEMA storage TO supabase_storage_admin;
-
-        -- Realtime schema (already exists from image)
-        GRANT ALL ON SCHEMA _realtime TO supabase_realtime_admin;
-
-        -- Extensions
-        CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
-        CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
-        CREATE EXTENSION IF NOT EXISTS pgjwt SCHEMA extensions;
-
-        -- Public schema grants
-        GRANT ALL ON SCHEMA public TO supabase_auth_admin, supabase_storage_admin;
-        GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-        GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
-        GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
-        GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
-      EOSQL
-
 healthcheck:
   url: "http://localhost:8000"
   interval: 30s
@@ -370,5 +315,8 @@ backup:
 
 setup:
   - name: "Wait for PostgreSQL"
-    command: "until pg_isready -U postgres; do sleep 2; done && sleep 5"
+    command: "until pg_isready -h localhost -U supabase_admin; do sleep 2; done && sleep 3"
+    service: db
+  - name: "Initialize Supabase roles and schemas"
+    command: "PGPASSWORD=${site_db_pass} psql -h localhost -U supabase_admin -d postgres -c \"DO \\$\\$BEGIN CREATE ROLE supabase_auth_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${site_db_pass}'; EXCEPTION WHEN duplicate_object THEN ALTER ROLE supabase_auth_admin WITH PASSWORD '${site_db_pass}'; END\\$\\$; DO \\$\\$BEGIN CREATE ROLE supabase_storage_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${site_db_pass}'; EXCEPTION WHEN duplicate_object THEN ALTER ROLE supabase_storage_admin WITH PASSWORD '${site_db_pass}'; END\\$\\$; ALTER ROLE authenticator WITH PASSWORD '${site_db_pass}'; ALTER ROLE supabase_realtime_admin WITH PASSWORD '${site_db_pass}'; GRANT anon TO authenticator; GRANT authenticated TO authenticator; GRANT service_role TO authenticator; GRANT supabase_admin TO authenticator; CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin; CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin; GRANT ALL ON SCHEMA auth TO supabase_auth_admin; GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role; GRANT ALL ON SCHEMA storage TO supabase_storage_admin; GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role; GRANT ALL ON SCHEMA _realtime TO supabase_realtime_admin; GRANT ALL ON SCHEMA public TO supabase_auth_admin, supabase_storage_admin; GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role; CREATE EXTENSION IF NOT EXISTS uuid_ossp SCHEMA extensions; CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions; CREATE EXTENSION IF NOT EXISTS pgjwt SCHEMA extensions;\""
     service: db
