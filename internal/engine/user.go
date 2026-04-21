@@ -200,10 +200,22 @@ func (e *Engine) GetUserByAPIKeyHash(hash string) (*models.User, error) {
 }
 
 func (e *Engine) findAvailableUID() (int, error) {
+	// Check both DB and system to avoid UID conflicts after data reset
 	users, _ := e.db.ListUsers()
 	usedUIDs := make(map[int]bool)
 	for _, u := range users {
 		usedUIDs[u.UID] = true
+	}
+	// Also check /etc/passwd for UIDs in our range (leftover from previous installs)
+	if data, err := os.ReadFile("/etc/passwd"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 3 {
+				if uid, err := strconv.Atoi(parts[2]); err == nil {
+					usedUIDs[uid] = true
+				}
+			}
+		}
 	}
 
 	for uid := uidRangeStart; uid < uidRangeEnd; uid++ {
