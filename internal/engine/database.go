@@ -70,13 +70,14 @@ func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
 	dbName := strings.ReplaceAll(domain, ".", "_")
 	dbUser := dbName
 
-	// Write dump to temp file in container, then restore
+	// Write dump to temp file in container, then restore via file (avoids shell injection)
+	b64Dump := base64Encode([]byte(dump))
 	var importCmd []string
 	switch dbCfg.Type {
 	case "mysql":
-		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | mysql -u%s -pbackup %s", dump, dbUser, dbName)}
+		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -pbackup %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
 	case "postgres":
-		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | psql -U %s %s", dump, dbUser, dbName)}
+		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
 	default:
 		return fmt.Errorf("unsupported database type for import: %s", dbCfg.Type)
 	}

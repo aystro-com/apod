@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/aystro/apod/internal/engine"
@@ -32,6 +34,11 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 func respondError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	// Sanitize internal error details for non-admin/non-socket requests
+	if status == http.StatusInternalServerError {
+		log.Printf("internal error: %s", msg)
+		msg = "internal server error"
+	}
 	json.NewEncoder(w).Encode(apiResponse{OK: false, Error: msg})
 }
 
@@ -54,6 +61,10 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 
 	if req.Domain == "" || req.Driver == "" {
 		respondError(w, http.StatusBadRequest, "domain and driver are required")
+		return
+	}
+	if !isValidDomain(req.Domain) {
+		respondError(w, http.StatusBadRequest, "invalid domain format")
 		return
 	}
 
@@ -134,6 +145,9 @@ func (h *Handler) GetSite(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) StartSite(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	if err := h.engine.StartSite(r.Context(), domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -143,6 +157,9 @@ func (h *Handler) StartSite(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) StopSite(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	if err := h.engine.StopSite(r.Context(), domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -152,6 +169,9 @@ func (h *Handler) StopSite(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RestartSite(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	if err := h.engine.RestartSite(r.Context(), domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -161,6 +181,9 @@ func (h *Handler) RestartSite(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DestroySite(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	purge := r.URL.Query().Get("purge") == "true"
 
 	if err := h.engine.DestroySite(r.Context(), domain, purge); err != nil {
@@ -181,6 +204,9 @@ func (h *Handler) ListDrivers(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AddDomain(w http.ResponseWriter, r *http.Request) {
 	siteDomain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, siteDomain) {
+		return
+	}
 	var req struct {
 		Domain string `json:"domain"`
 	}
@@ -201,6 +227,9 @@ func (h *Handler) AddDomain(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RemoveDomain(w http.ResponseWriter, r *http.Request) {
 	siteDomain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, siteDomain) {
+		return
+	}
 	removeDomain := chi.URLParam(r, "aliasDomain")
 	if err := h.engine.RemoveDomain(r.Context(), siteDomain, removeDomain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -211,6 +240,9 @@ func (h *Handler) RemoveDomain(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListDomains(w http.ResponseWriter, r *http.Request) {
 	siteDomain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, siteDomain) {
+		return
+	}
 	domains, err := h.engine.ListDomains(r.Context(), siteDomain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -221,6 +253,9 @@ func (h *Handler) ListDomains(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	config, err := h.engine.GetConfig(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
@@ -231,6 +266,9 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
@@ -252,6 +290,9 @@ func (h *Handler) SetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SetEnv(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
@@ -273,6 +314,9 @@ func (h *Handler) SetEnv(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UnsetEnv(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	key := chi.URLParam(r, "key")
 	if err := h.engine.UnsetEnv(r.Context(), domain, key); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -283,6 +327,9 @@ func (h *Handler) UnsetEnv(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListEnv(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	envs, err := h.engine.ListEnv(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -293,6 +340,9 @@ func (h *Handler) ListEnv(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateBackupHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Storage string `json:"storage"`
 	}
@@ -308,6 +358,9 @@ func (h *Handler) CreateBackupHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListBackupsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	backups, err := h.engine.ListBackups(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -340,6 +393,9 @@ func (h *Handler) DownloadBackupHandler(w http.ResponseWriter, r *http.Request) 
 
 func (h *Handler) RestoreBackupHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		BackupID int64 `json:"backup_id"`
 	}
@@ -356,6 +412,9 @@ func (h *Handler) RestoreBackupHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteBackupHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		BackupID int64 `json:"backup_id"`
 	}
@@ -372,6 +431,9 @@ func (h *Handler) DeleteBackupHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AddBackupScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Every   string `json:"every"`
 		Storage string `json:"storage"`
@@ -394,6 +456,9 @@ func (h *Handler) AddBackupScheduleHandler(w http.ResponseWriter, r *http.Reques
 
 func (h *Handler) ListBackupSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	schedules, err := h.engine.ListBackupSchedules(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -459,6 +524,9 @@ func (h *Handler) RemoveStorageConfigHandler(w http.ResponseWriter, r *http.Requ
 
 func (h *Handler) DeployHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Branch string `json:"branch"`
 	}
@@ -472,6 +540,9 @@ func (h *Handler) DeployHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RollbackHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	if err := h.engine.Rollback(r.Context(), domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -481,6 +552,9 @@ func (h *Handler) RollbackHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListDeploymentsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	deps, err := h.engine.ListDeployments(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -491,6 +565,9 @@ func (h *Handler) ListDeploymentsHandler(w http.ResponseWriter, r *http.Request)
 
 func (h *Handler) CreateWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	token, err := h.engine.CreateWebhook(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -501,6 +578,9 @@ func (h *Handler) CreateWebhookHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListWebhooksHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	whs, err := h.engine.ListWebhooks(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -511,6 +591,9 @@ func (h *Handler) ListWebhooksHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	if err := h.engine.DeleteWebhook(r.Context(), domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -520,6 +603,9 @@ func (h *Handler) DeleteWebhookHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CloneSiteHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Target string `json:"target"`
 	}
@@ -540,6 +626,9 @@ func (h *Handler) CloneSiteHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DBExportHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	dump, err := h.engine.DBExport(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -550,6 +639,9 @@ func (h *Handler) DBExportHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DBImportHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Dump string `json:"dump"`
 	}
@@ -584,6 +676,9 @@ func (h *Handler) DiskUsageHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AddCronJobHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Schedule string `json:"schedule"`
 		Command  string `json:"command"`
@@ -607,6 +702,9 @@ func (h *Handler) AddCronJobHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListCronJobsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	jobs, err := h.engine.ListCronJobs(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -641,6 +739,9 @@ func (h *Handler) IncomingWebhookHandler(w http.ResponseWriter, r *http.Request)
 
 func (h *Handler) MonitorSiteHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	stats, err := h.engine.GetSiteStats(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -660,6 +761,9 @@ func (h *Handler) MonitorAllHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) EnableUptimeHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		URL          string `json:"url"`
 		Interval     int    `json:"interval"`
@@ -685,6 +789,9 @@ func (h *Handler) EnableUptimeHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DisableUptimeHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	if err := h.engine.DisableUptime(r.Context(), domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -694,6 +801,9 @@ func (h *Handler) DisableUptimeHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UptimeStatusHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	status, err := h.engine.GetUptimeStatus(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
@@ -704,6 +814,9 @@ func (h *Handler) UptimeStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UptimeLogsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	logs, err := h.engine.GetUptimeLogs(r.Context(), domain, 50)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -714,6 +827,9 @@ func (h *Handler) UptimeLogsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ContainerLogsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	lines := 100
 	output, err := h.engine.GetContainerLogs(r.Context(), domain, lines)
 	if err != nil {
@@ -725,6 +841,9 @@ func (h *Handler) ContainerLogsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SiteLogsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	logs, err := h.engine.GetLogs(r.Context(), domain, 50)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -745,6 +864,9 @@ func (h *Handler) AllLogsHandler(w http.ResponseWriter, r *http.Request) {
 // Proxy rules
 func (h *Handler) AddProxyRuleHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Type   string            `json:"type"`
 		Config map[string]string `json:"config"`
@@ -763,6 +885,9 @@ func (h *Handler) AddProxyRuleHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListProxyRulesHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	rules, err := h.engine.ListProxyRules(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -786,6 +911,9 @@ func (h *Handler) RemoveProxyRuleHandler(w http.ResponseWriter, r *http.Request)
 // IP blocking
 func (h *Handler) BlockIPHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		IP string `json:"ip"`
 	}
@@ -799,6 +927,9 @@ func (h *Handler) BlockIPHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UnblockIPHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		IP string `json:"ip"`
 	}
@@ -812,6 +943,9 @@ func (h *Handler) UnblockIPHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListIPRulesHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	rules, err := h.engine.ListIPRules(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -823,6 +957,9 @@ func (h *Handler) ListIPRulesHandler(w http.ResponseWriter, r *http.Request) {
 // FTP
 func (h *Handler) AddFTPAccountHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -837,6 +974,9 @@ func (h *Handler) AddFTPAccountHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListFTPAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	accounts, err := h.engine.ListFTPAccounts(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -877,6 +1017,10 @@ func (h *Handler) FirewallAllowHandler(w http.ResponseWriter, r *http.Request) {
 		Port string `json:"port"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
+	if !isValidPort(req.Port) {
+		respondError(w, http.StatusBadRequest, "invalid port format (e.g., 80, 443/tcp)")
+		return
+	}
 	if err := h.engine.FirewallAllow(r.Context(), req.Port); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -889,6 +1033,10 @@ func (h *Handler) FirewallDenyHandler(w http.ResponseWriter, r *http.Request) {
 		Port string `json:"port"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
+	if !isValidPort(req.Port) {
+		respondError(w, http.StatusBadRequest, "invalid port format (e.g., 80, 443/tcp)")
+		return
+	}
 	if err := h.engine.FirewallDeny(r.Context(), req.Port); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1076,24 +1224,49 @@ func (h *Handler) TerminalExecHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"output": output})
 }
 
-// isCommandSafe blocks dangerous commands
+// blockedCmdPattern matches dangerous commands at word boundaries to prevent bypass via substrings
+var blockedCmdPattern = regexp.MustCompile(`(?i)\b(mount|umount|insmod|rmmod|modprobe|iptables|ip6tables|nftables|reboot|shutdown|halt|poweroff|mkfs|fdisk|nsenter|unshare|chroot|pivot_root|swapon|swapoff|kexec|sysctl)\b`)
+
+// shellMetaChars detects shell metacharacters used for injection (backticks, $(), pipes to dangerous cmds)
+var shellEscapePattern = regexp.MustCompile("(`|\\$\\()")
+
+// isCommandSafe blocks dangerous commands using word-boundary matching
 func isCommandSafe(cmd string) bool {
 	if cmd == "" || len(cmd) > 4096 {
 		return false
 	}
-	// Block commands that could affect the host or other containers
-	blocked := []string{
-		"mount", "umount", "insmod", "rmmod", "modprobe",
-		"iptables", "ip6tables", "nftables",
-		"reboot", "shutdown", "halt", "poweroff", "init 0",
-		"mkfs", "fdisk", "dd if=/dev",
-		"nsenter", "unshare",
+	// Block shell escape sequences that could bypass filtering
+	if shellEscapePattern.MatchString(cmd) {
+		return false
 	}
-	lower := strings.ToLower(cmd)
-	for _, b := range blocked {
-		if strings.Contains(lower, b) {
-			return false
-		}
+	// Block dangerous commands at word boundaries
+	if blockedCmdPattern.MatchString(cmd) {
+		return false
+	}
+	// Block dd with device access
+	if matched, _ := regexp.MatchString(`(?i)\bdd\b.*\bif=/dev`, cmd); matched {
+		return false
+	}
+	// Block init with runlevel arguments
+	if matched, _ := regexp.MatchString(`(?i)\binit\s+[0-6]\b`, cmd); matched {
+		return false
 	}
 	return true
+}
+
+// isValidDomain validates domain format to prevent container name injection
+var validDomainPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*$`)
+
+func isValidDomain(domain string) bool {
+	if len(domain) > 253 {
+		return false
+	}
+	return validDomainPattern.MatchString(strings.ToLower(domain))
+}
+
+// isValidPort validates firewall port format (e.g., "22", "80/tcp", "443/udp")
+var validPortPattern = regexp.MustCompile(`^[0-9]{1,5}(/(tcp|udp))?$`)
+
+func isValidPort(port string) bool {
+	return validPortPattern.MatchString(port)
 }

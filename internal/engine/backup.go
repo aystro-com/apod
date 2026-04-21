@@ -216,7 +216,11 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			if relPath == "" {
 				continue
 			}
+			// Prevent zip slip: ensure extracted path stays within siteRoot
 			destPath := filepath.Join(siteRoot, relPath)
+			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(siteRoot)+string(filepath.Separator)) {
+				continue // skip files that would escape the site root
+			}
 			os.MkdirAll(filepath.Dir(destPath), 0755)
 			rc, _ := f.Open()
 			dest, _ := os.Create(destPath)
@@ -271,5 +275,11 @@ func (e *Engine) GetBackupPath(ctx context.Context, domain string, backupID int6
 	if backup.SiteDomain != domain {
 		return "", fmt.Errorf("backup does not belong to this site")
 	}
-	return backup.Path, nil
+	// Validate path stays within backup directory to prevent path traversal
+	backupDir := filepath.Join(e.dataDir, "backups")
+	cleanPath := filepath.Clean(filepath.Join(backupDir, backup.Path))
+	if !strings.HasPrefix(cleanPath, backupDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid backup path")
+	}
+	return cleanPath, nil
 }

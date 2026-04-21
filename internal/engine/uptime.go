@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -92,10 +95,18 @@ func (uc *UptimeChecker) stopCheck(domain string) {
 	}
 }
 
-func (uc *UptimeChecker) ping(url string) (bool, int, int) {
-	client := &http.Client{Timeout: 10 * time.Second}
+func (uc *UptimeChecker) ping(rawURL string) (bool, int, int) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
 	start := time.Now()
-	resp, err := client.Get(url)
+	resp, err := client.Get(rawURL)
 	elapsed := int(time.Since(start).Milliseconds())
 	if err != nil {
 		return false, 0, elapsed
@@ -106,6 +117,10 @@ func (uc *UptimeChecker) ping(url string) (bool, int, int) {
 }
 
 func (uc *UptimeChecker) sendAlert(webhook, domain, status string, statusCode int) {
+	if err := validatePublicURL(webhook); err != nil {
+		log.Printf("uptime: refusing to send alert to %s: %v", webhook, err)
+		return
+	}
 	payload := map[string]interface{}{
 		"domain":      domain,
 		"status":      status,
@@ -113,18 +128,63 @@ func (uc *UptimeChecker) sendAlert(webhook, domain, status string, statusCode in
 		"timestamp":   time.Now().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(payload)
-	http.Post(webhook, "application/json", bytes.NewReader(data))
+	client := &http.Client{Timeout: 10 * time.Second}
+	client.Post(webhook, "application/json", bytes.NewReader(data))
+}
+
+// validatePublicURL ensures a URL is HTTP(S) and doesn't point to private/internal IPs
+func validatePublicURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("URL scheme must be http or https")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL must have a hostname")
+	}
+	// Block common internal hostnames
+	lower := strings.ToLower(host)
+	if lower == "localhost" || lower == "metadata.google.internal" || strings.HasSuffix(lower, ".internal") {
+		return fmt.Errorf("URL points to internal host")
+	}
+	// Resolve and check for private IPs
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		return nil // allow if DNS resolution fails (might be external)
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("URL resolves to private/internal IP %s", ipStr)
+		}
+	}
+	return nil
 }
 
 // Engine methods
-func (e *Engine) EnableUptime(ctx context.Context, domain, url string, intervalSec int, alertWebhook string) error {
-	if err := e.db.CreateUptimeCheck(domain, url, intervalSec, alertWebhook); err != nil {
+func (e *Engine) EnableUptime(ctx context.Context, domain, rawURL string, intervalSec int, alertWebhook string) error {
+	if err := validatePublicURL(rawURL); err != nil {
+		return fmt.Errorf("invalid uptime URL: %w", err)
+	}
+	if alertWebhook != "" {
+		if err := validatePublicURL(alertWebhook); err != nil {
+			return fmt.Errorf("invalid webhook URL: %w", err)
+		}
+	}
+	if err := e.db.CreateUptimeCheck(domain, rawURL, intervalSec, alertWebhook); err != nil {
 		return err
 	}
 	if e.uptimeChecker != nil {
-		e.uptimeChecker.startCheck(domain, url, intervalSec, alertWebhook)
+		e.uptimeChecker.startCheck(domain, rawURL, intervalSec, alertWebhook)
 	}
-	e.LogActivity(domain, "uptime_enable", fmt.Sprintf("url=%s interval=%ds", url, intervalSec), "success")
+	e.LogActivity(domain, "uptime_enable", fmt.Sprintf("url=%s interval=%ds", rawURL, intervalSec), "success")
 	return nil
 }
 

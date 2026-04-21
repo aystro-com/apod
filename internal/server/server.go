@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/aystro/apod/internal/engine"
 	"github.com/go-chi/chi/v5"
@@ -26,6 +27,7 @@ func New(e *engine.Engine) *Server {
 
 	r.Use(RecoveryMiddleware)
 	r.Use(LoggingMiddleware)
+	r.Use(RateLimitMiddleware(60, 1*time.Minute)) // 60 requests per minute per IP
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(AuthMiddleware(e))

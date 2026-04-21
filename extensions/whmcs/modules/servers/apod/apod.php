@@ -653,8 +653,10 @@ function apod_request(array $params, string $endpoint, string $method = 'GET', a
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 120);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+    // Enable SSL verification by default; set server accesshash to "insecure" to disable
+    $skipSSL = (!empty($params['serveraccesshash']) && trim($params['serveraccesshash']) === 'insecure');
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $skipSSL ? 0 : 2);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, !$skipSSL);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Authorization: Bearer ' . $apiKey,
         'Content-Type: application/json',

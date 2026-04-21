@@ -74,10 +74,17 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 				continue // non-fatal, site might not have a populated DB
 			}
 
-			// Import to target
-			restoreCmd := dbRestoreCommand(dbCfg.Type, targetDbName, targetDbName, "backup", "/dev/stdin")
-			if restoreCmd != nil {
-				e.docker.ExecInContainer(ctx, targetContainer, append([]string{"sh", "-c", fmt.Sprintf("echo '%s' | %s", output, strings.Join(restoreCmd, " "))}))
+			// Import to target via base64 to avoid shell injection
+			b64Dump := base64Encode([]byte(output))
+			var restoreShell string
+			switch dbCfg.Type {
+			case "mysql":
+				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql -u%s -pbackup %s < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
+			case "postgres":
+				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U %s -d %s -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
+			}
+			if restoreShell != "" {
+				e.docker.ExecInContainer(ctx, targetContainer, []string{"sh", "-c", restoreShell})
 			}
 		}
 	}
