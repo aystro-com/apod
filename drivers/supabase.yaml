@@ -305,17 +305,20 @@ files:
     content: |
       #!/bin/bash
       # Idempotent Supabase role/schema initialization
-      # Note: supabase/postgres image already creates supabase_admin (superuser),
-      # supabase_auth_admin, supabase_storage_admin, anon, authenticated, service_role
-      psql --username "supabase_admin" --dbname "postgres" <<-EOSQL
-        -- Create missing roles
-        DO \$\$BEGIN CREATE ROLE authenticator NOINHERIT LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
-        DO \$\$BEGIN CREATE ROLE supabase_realtime_admin NOINHERIT LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
+      # The supabase/postgres image creates: supabase_admin, anon, authenticated,
+      # service_role, authenticator, supabase_realtime_admin, pgbouncer
+      # We need to create: supabase_auth_admin, supabase_storage_admin + schemas
+      export PGPASSWORD="${POSTGRES_PASSWORD}"
+      psql -h localhost -U supabase_admin -d postgres <<EOSQL
+        -- Create auth/storage admin roles (image does NOT create these)
+        DO \$\$BEGIN CREATE ROLE supabase_auth_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
+        DO \$\$BEGIN CREATE ROLE supabase_storage_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
 
-        -- Set passwords for existing roles
+        -- Set passwords for all roles (image may set different defaults)
         ALTER ROLE supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
         ALTER ROLE supabase_storage_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
         ALTER ROLE authenticator WITH PASSWORD '${POSTGRES_PASSWORD}';
+        ALTER ROLE supabase_realtime_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
 
         -- Grant memberships
         GRANT anon TO authenticator;
@@ -326,14 +329,14 @@ files:
         -- Auth schema
         CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
         GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+        GRANT CREATE ON SCHEMA auth TO supabase_auth_admin;
 
         -- Storage schema
         CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin;
         GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
+        GRANT CREATE ON SCHEMA storage TO supabase_storage_admin;
 
-        -- Realtime schema
-        CREATE SCHEMA IF NOT EXISTS _realtime;
-        GRANT ALL ON SCHEMA _realtime TO supabase_admin;
+        -- Realtime schema (already exists from image)
         GRANT ALL ON SCHEMA _realtime TO supabase_realtime_admin;
 
         -- Extensions
@@ -342,6 +345,7 @@ files:
         CREATE EXTENSION IF NOT EXISTS pgjwt SCHEMA extensions;
 
         -- Public schema grants
+        GRANT ALL ON SCHEMA public TO supabase_auth_admin, supabase_storage_admin;
         GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
         GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
         GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
