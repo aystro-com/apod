@@ -138,7 +138,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		Owner:   opts.Owner,
 	}
 	if site.RAM == "" {
-		site.RAM = "256M"
+		site.RAM = "512M"
 	}
 	if site.CPU == "" {
 		site.CPU = "1"
