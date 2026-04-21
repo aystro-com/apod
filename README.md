@@ -175,15 +175,24 @@ apod version             # Check current version
     wordpress.yaml
     laravel.yaml
 
-/var/lib/apod/
+/var/lib/apod/                        # Admin-owned sites
   sites/
     example.com/
-      files/              # Site code (mounted into container)
+      files/                          # Site code (mounted into container)
       data/
-        mysql/            # Database files
-  backups/
+        mysql/                        # Database files
+  backups/                            # Admin site backups
     example.com/
       example.com_20260420_120000.zip
+
+/home/<user>/                         # User-owned sites
+  sites/
+    mysite.com/
+      files/
+      data/
+  backups/                            # User backups (counts against disk quota)
+    mysite.com/
+      mysite.com_20260420_120000.zip
 ```
 
 ### Remote Access
@@ -419,7 +428,7 @@ Each backup includes:
 - **Volume data** — persistent data from `${data_root}` (auto-included if not in driver paths)
 - **Metadata** — domain, driver, env vars, resource config
 
-Backups are verified after creation (empty backups are rejected).
+Backups are verified after creation (empty backups are rejected). User-owned site backups are stored in `/home/<user>/backups/` and count against the user's disk quota. Admin site backups go to `/var/lib/apod/backups/`.
 
 ```bash
 apod backup create <domain> [--storage <name>]

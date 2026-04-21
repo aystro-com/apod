@@ -53,9 +53,19 @@ type backupMetadata struct {
 	CreatedAt string            `json:"created_at"`
 }
 
-func (e *Engine) getStorage(ctx context.Context, storageName string) (storage.Storage, error) {
+// backupDir returns the local backup directory for a site based on ownership.
+// User-owned sites: /home/<owner>/backups/  (counts against disk quota)
+// Admin sites: /var/lib/apod/backups/
+func (e *Engine) backupDir(owner string) string {
+	if owner != "" {
+		return filepath.Join("/home", owner, "backups")
+	}
+	return filepath.Join(e.dataDir, "backups")
+}
+
+func (e *Engine) getStorage(ctx context.Context, storageName, owner string) (storage.Storage, error) {
 	if storageName == "" || storageName == "local" {
-		return storage.NewLocal(filepath.Join(e.dataDir, "backups")), nil
+		return storage.NewLocal(e.backupDir(owner)), nil
 	}
 
 	sc, err := e.db.GetStorageConfig(storageName)
@@ -87,7 +97,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		return 0, fmt.Errorf("load driver: %w", err)
 	}
 
-	store, err := e.getStorage(ctx, storageName)
+	store, err := e.getStorage(ctx, storageName, site.Owner)
 	if err != nil {
 		return 0, err
 	}
@@ -189,9 +199,28 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		return 0, fmt.Errorf("backup verification failed: backup is empty")
 	}
 
+	// Ensure backup directory exists and is owned by the user
+	bkDir := e.backupDir(site.Owner)
+	os.MkdirAll(bkDir, 0755)
+	if site.Owner != "" {
+		if user, err := e.db.GetUserByName(site.Owner); err == nil {
+			os.Chown(bkDir, user.UID, user.UID)
+		}
+	}
+
 	// Upload
 	if err := store.Upload(ctx, zipKey, bytes.NewReader(buf.Bytes())); err != nil {
 		return 0, fmt.Errorf("upload backup: %w", err)
+	}
+
+	// Set ownership on backup file for user-owned sites
+	if site.Owner != "" && (storageName == "" || storageName == "local") {
+		backupFile := filepath.Join(bkDir, zipKey)
+		if user, err := e.db.GetUserByName(site.Owner); err == nil {
+			// Own the domain subdirectory too
+			os.Chown(filepath.Dir(backupFile), user.UID, user.UID)
+			os.Chown(backupFile, user.UID, user.UID)
+		}
 	}
 
 	if storageName == "" {
@@ -220,7 +249,12 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 		return fmt.Errorf("backup %d belongs to %q, not %q", backupID, backup.SiteDomain, domain)
 	}
 
-	store, err := e.getStorage(ctx, backup.StorageName)
+	site, err := e.db.GetSite(domain)
+	if err != nil {
+		return fmt.Errorf("get site: %w", err)
+	}
+
+	store, err := e.getStorage(ctx, backup.StorageName, site.Owner)
 	if err != nil {
 		return err
 	}
@@ -242,7 +276,6 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 		return fmt.Errorf("open zip: %w", err)
 	}
 
-	site, _ := e.db.GetSite(domain)
 	siteRoot, dataRoot := e.SiteDir(site.Owner, domain)
 
 	for _, f := range zr.File {
@@ -307,7 +340,12 @@ func (e *Engine) DeleteBackup(ctx context.Context, domain string, backupID int64
 	if backup.SiteDomain != domain {
 		return fmt.Errorf("backup %d belongs to %q, not %q", backupID, backup.SiteDomain, domain)
 	}
-	store, err := e.getStorage(ctx, backup.StorageName)
+	site, _ := e.db.GetSite(domain)
+	owner := ""
+	if site != nil {
+		owner = site.Owner
+	}
+	store, err := e.getStorage(ctx, backup.StorageName, owner)
 	if err != nil {
 		return err
 	}
@@ -327,10 +365,15 @@ func (e *Engine) GetBackupPath(ctx context.Context, domain string, backupID int6
 	if backup.SiteDomain != domain {
 		return "", fmt.Errorf("backup does not belong to this site")
 	}
+	site, _ := e.db.GetSite(domain)
+	owner := ""
+	if site != nil {
+		owner = site.Owner
+	}
 	// Validate path stays within backup directory to prevent path traversal
-	backupDir := filepath.Join(e.dataDir, "backups")
-	cleanPath := filepath.Clean(filepath.Join(backupDir, backup.Path))
-	if !strings.HasPrefix(cleanPath, backupDir+string(filepath.Separator)) {
+	bkDir := e.backupDir(owner)
+	cleanPath := filepath.Clean(filepath.Join(bkDir, backup.Path))
+	if !strings.HasPrefix(cleanPath, bkDir+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid backup path")
 	}
 	return cleanPath, nil
