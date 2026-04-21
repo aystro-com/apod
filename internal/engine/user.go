@@ -102,8 +102,9 @@ func (e *Engine) DeleteUser(ctx context.Context, name string) error {
 		return fmt.Errorf("user %q still owns %d site(s) — destroy or reassign them first", name, count)
 	}
 
-	// Remove Linux user and home directory
-	cmd := exec.CommandContext(ctx, "userdel", "--remove", name)
+	// Kill any processes owned by this user, then remove Linux user and home dir
+	exec.CommandContext(ctx, "pkill", "-u", name).Run()
+	cmd := exec.CommandContext(ctx, "userdel", "--remove", "--force", name)
 	cmd.Run() // Best effort — user may not exist on this system
 
 	// Delete from database
