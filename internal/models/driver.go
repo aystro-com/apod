@@ -50,12 +50,20 @@ type DriverDeployHooks struct {
 	AfterDeploy  []string `yaml:"after_deploy,omitempty"`
 }
 
+// DriverFile defines a file to generate before containers start.
+// Path and Content are subject to variable expansion.
+type DriverFile struct {
+	Path    string `yaml:"path"`
+	Content string `yaml:"content"`
+}
+
 type Driver struct {
 	Name        string                   `yaml:"name"`
 	Version     string                   `yaml:"version"`
 	Description string                   `yaml:"description"`
 	Parameters  map[string]DriverParam   `yaml:"parameters,omitempty"`
 	Services    map[string]DriverService `yaml:"services"`
+	Files       []DriverFile             `yaml:"files,omitempty"`
 	Healthcheck DriverHealthcheck        `yaml:"healthcheck,omitempty"`
 	Backup      DriverBackup             `yaml:"backup,omitempty"`
 	Cron        []DriverCron             `yaml:"cron,omitempty"`

@@ -225,6 +225,7 @@ Drivers are YAML files that define application stacks. Each driver specifies Doc
 | `unifi` | UniFi Network Controller + MongoDB | `jacobalberty/unifi:latest` + `mongo:4.4` |
 | `paymenter` | Paymenter billing + MySQL + Redis | `webdevops/php-nginx-dev:8.3` + `mysql:8.0` + `redis:7` |
 | `whmcs` | WHMCS + MySQL + ionCube | `php:8.2-apache` + `mysql:8.0` |
+| `supabase` | Supabase (Auth, REST, Realtime, Storage, Studio) | `supabase/postgres` + `kong` + 7 services |
 
 **SaaS-ify any app:** Write a 20-40 line YAML driver for any Docker app, connect a billing panel, and sell managed instances. We went from zero to selling managed Odoo in under 30 minutes.
 

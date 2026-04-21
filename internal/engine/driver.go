@@ -79,4 +79,8 @@ func ExpandDriverVariables(driver *models.Driver, vars map[string]string) {
 	for i, step := range driver.Setup {
 		driver.Setup[i].Command = expandVariables(step.Command, vars)
 	}
+	for i, f := range driver.Files {
+		driver.Files[i].Path = expandVariables(f.Path, vars)
+		driver.Files[i].Content = expandVariables(f.Content, vars)
+	}
 }

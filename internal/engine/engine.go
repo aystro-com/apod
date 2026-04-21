@@ -185,13 +185,29 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	dbName := strings.ReplaceAll(opts.Domain, ".", "_")
 	dbUser := dbName
 
+	// Generate additional secrets for complex drivers (Supabase etc.)
+	jwtSecret := randomBase64(30)
+	anonKey := generateSupabaseJWT(jwtSecret, "anon")
+	serviceRoleKey := generateSupabaseJWT(jwtSecret, "service_role")
+
 	vars := map[string]string{
-		"site_root":    siteRoot,
-		"data_root":    dataRoot,
-		"site_domain":  opts.Domain,
-		"site_db_name": dbName,
-		"site_db_user": dbUser,
-		"site_db_pass": dbPass,
+		"site_root":              siteRoot,
+		"data_root":             dataRoot,
+		"site_domain":           opts.Domain,
+		"site_db_name":          dbName,
+		"site_db_user":          dbUser,
+		"site_db_pass":          dbPass,
+		"jwt_secret":            jwtSecret,
+		"anon_key":              anonKey,
+		"service_role_key":      serviceRoleKey,
+		"secret_key_base":       randomBase64(48),
+		"vault_enc_key":         randomHex(16),
+		"dashboard_password":    randomHex(16),
+		"pg_meta_crypto_key":    randomBase64(24),
+		"s3_access_key_id":      randomHex(16),
+		"s3_access_key_secret":  randomHex(32),
+		"logflare_public_token": randomBase64(24),
+		"logflare_private_token": randomBase64(24),
 	}
 	// Add driver parameter defaults to vars
 	for key, param := range driver.Parameters {
@@ -202,6 +218,17 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		}
 	}
 	ExpandDriverVariables(driver, vars)
+
+	// Write driver files before container creation (e.g., kong.yml, init SQL)
+	for _, f := range driver.Files {
+		dir := filepath.Dir(f.Path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create directory for %s: %w", f.Path, err)
+		}
+		if err := os.WriteFile(f.Path, []byte(f.Content), 0644); err != nil {
+			return fmt.Errorf("write file %s: %w", f.Path, err)
+		}
+	}
 
 	if err := e.traefik.EnsureRunning(ctx); err != nil {
 		return fmt.Errorf("ensure traefik: %w", err)
