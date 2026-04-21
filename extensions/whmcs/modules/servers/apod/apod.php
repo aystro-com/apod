@@ -550,15 +550,36 @@ function apod_TestConnection(array $params)
  */
 function apod_request(array $params, string $endpoint, string $method = 'GET', array $data = [])
 {
-    $host = rtrim($params['serverhostname'] ?: $params['serverip'], '/');
-    $port = $params['serverport'] ?: '8443';
-    $scheme = $params['serversecure'] ? 'https' : 'http';
-    $apiKey = $params['serverpassword'] ?? '';
-    // WHMCS may encrypt the password — try to decrypt
-    if (!empty($apiKey) && !str_starts_with($apiKey, 'apod_')) {
+    $host = rtrim($params['serverhostname'] ?: ($params['serverip'] ?? ''), '/');
+    $port = $params['serverport'] ?? '';
+    $scheme = !empty($params['serversecure']) ? 'https' : 'http';
+
+    // Fetch from DB if missing
+    if (empty($host) || empty($port)) {
         try {
-            $apiKey = decrypt($apiKey);
+            $srv = \WHMCS\Database\Capsule::table('tblservers')->where('type', 'apod')->first();
+            if ($srv) {
+                if (empty($host)) $host = $srv->hostname ?: $srv->ipaddress;
+                if (empty($port)) $port = $srv->port;
+            }
         } catch (\Exception $e) {}
+    }
+    if (empty($port)) $port = '8443';
+    // Always fetch API key from DB to avoid encryption issues
+    $apiKey = $params['serverpassword'] ?? '';
+    if (empty($apiKey) || !str_starts_with($apiKey, 'apod_')) {
+        try {
+            $serverId = $params['serverid'] ?? null;
+            if ($serverId) {
+                $apiKey = \WHMCS\Database\Capsule::table('tblservers')->where('id', $serverId)->value('password');
+            } else {
+                $apiKey = \WHMCS\Database\Capsule::table('tblservers')->where('type', 'apod')->value('password');
+            }
+        } catch (\Exception $e) {}
+        // If still encrypted, try decrypt
+        if (!empty($apiKey) && !str_starts_with($apiKey, 'apod_')) {
+            try { $apiKey = decrypt($apiKey); } catch (\Exception $e) {}
+        }
     }
 
     $url = $scheme . '://' . $host . ':' . $port . '/api/v1' . $endpoint;
