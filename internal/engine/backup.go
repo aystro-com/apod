@@ -145,11 +145,18 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 
 		var output string
 		var err error
-		if isCompose {
-			output, err = e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, dumpCmd)
-		} else {
-			containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-			output, err = e.docker.ExecInContainer(ctx, containerName, dumpCmd)
+		// Retry up to 3 times (container may still be starting after stop/start)
+		for attempt := 0; attempt < 3; attempt++ {
+			if isCompose {
+				output, err = e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, dumpCmd)
+			} else {
+				containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
+				output, err = e.docker.ExecInContainer(ctx, containerName, dumpCmd)
+			}
+			if err == nil {
+				break
+			}
+			time.Sleep(5 * time.Second)
 		}
 		if err != nil {
 			return 0, fmt.Errorf("dump %s database: %w", dbCfg.Type, err)
