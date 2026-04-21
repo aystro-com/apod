@@ -30,8 +30,20 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 		return fmt.Errorf("load driver: %w", err)
 	}
 
+	// Auto-backup before deploy (non-blocking — log warning on failure)
+	e.locks.Release(domain) // release lock temporarily for backup
+	backupID, err := e.CreateBackup(ctx, domain, "")
+	if err != nil {
+		e.LogActivity(domain, "deploy_backup", fmt.Sprintf("pre-deploy backup failed: %v", err), "warning")
+	} else {
+		e.LogActivity(domain, "deploy_backup", fmt.Sprintf("pre-deploy backup #%d created", backupID), "success")
+	}
+	if err := e.locks.Acquire(domain); err != nil {
+		return err
+	}
+
 	// Record deployment
-	siteRoot := fmt.Sprintf("%s/sites/%s/files", e.dataDir, domain)
+	siteRoot, _ := e.SiteDir(site.Owner, domain)
 
 	// Git pull
 	var commitHash string
@@ -99,7 +111,7 @@ func (e *Engine) Rollback(ctx context.Context, domain string) error {
 	}
 
 	site, _ := e.db.GetSite(domain)
-	siteRoot := fmt.Sprintf("%s/sites/%s/files", e.dataDir, domain)
+	siteRoot, _ := e.SiteDir(site.Owner, domain)
 
 	// Rollback git to previous commit
 	if dep.CommitHash != "" {

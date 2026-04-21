@@ -10,8 +10,8 @@ Hosting panels are bloated. PaaS platforms are expensive. Kubernetes is overkill
 - **Docker-native** — every site runs in its own isolated container stack
 - **Automatic SSL** — Let's Encrypt via Traefik, zero config
 - **Driver system** — define stacks as YAML (PHP, Laravel, WordPress, Node.js, Odoo, or roll your own)
-- **Git deploys** — push to deploy with rollback support
-- **Backups** — scheduled backups to S3, R2, SFTP, or local with download/restore
+- **Git deploys** — push to deploy with rollback support and automatic pre-deploy backup
+- **Backups** — databases (gzip-compressed) + site files + volume data, scheduled to S3/R2/SFTP/local
 - **CLI + REST API** — script everything, automate anything
 - **Multi-user** — Linux-level isolation with API key auth and ownership enforcement
 - **Resource limits** — CPU, RAM, disk quotas, PID limits — all kernel-enforced
@@ -413,12 +413,22 @@ Use this in GitHub/GitLab webhook settings — any push triggers a deploy.
 
 ### Backups
 
+Each backup includes:
+- **Database dumps** (gzip-compressed) — MySQL, PostgreSQL, MongoDB
+- **Site files** — application code from `${site_root}`
+- **Volume data** — persistent data from `${data_root}` (auto-included if not in driver paths)
+- **Metadata** — domain, driver, env vars, resource config
+
+Backups are verified after creation (empty backups are rejected).
+
 ```bash
 apod backup create <domain> [--storage <name>]
 apod backup list <domain>
 apod backup restore <domain> <backup-id>
 apod backup delete <domain> <backup-id>
 ```
+
+**Auto backup before deploy:** Every `apod deploy` automatically creates a backup first, so you can always roll back safely.
 
 **Scheduled backups:**
 

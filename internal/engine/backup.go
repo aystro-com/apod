@@ -3,6 +3,7 @@ package engine
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -101,7 +102,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	dbName := strings.ReplaceAll(domain, ".", "_")
 	dbUser := dbName
 
-	// Dump databases
+	// Dump databases (gzip-compressed)
 	for _, dbCfg := range driver.Backup.Databases {
 		containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
 		dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
@@ -112,21 +113,47 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		if err != nil {
 			return 0, fmt.Errorf("dump %s database: %w", dbCfg.Type, err)
 		}
-		w, _ := zw.Create(fmt.Sprintf("databases/%s_%s.sql", dbCfg.Service, dbCfg.Type))
-		w.Write([]byte(output))
+		if len(strings.TrimSpace(output)) == 0 {
+			e.LogActivity(domain, "backup_warning", fmt.Sprintf("empty %s dump from %s", dbCfg.Type, dbCfg.Service), "warning")
+			continue
+		}
+		w, _ := zw.Create(fmt.Sprintf("databases/%s_%s.sql.gz", dbCfg.Service, dbCfg.Type))
+		gz := gzip.NewWriter(w)
+		gz.Write([]byte(output))
+		gz.Close()
 	}
 
-	// Copy site files
+	// Collect backup paths — driver-defined paths + data_root (if not already included)
+	backupPaths := make(map[string]string) // expanded -> prefix in zip
 	for _, p := range driver.Backup.Paths {
 		expanded := strings.ReplaceAll(p, "${site_root}", siteRoot)
 		expanded = strings.ReplaceAll(expanded, "${data_root}", dataRoot)
+		backupPaths[expanded] = "files"
+	}
+	// Auto-include data_root for volume data if not already covered
+	if _, ok := backupPaths[dataRoot]; !ok {
+		covered := false
+		for p := range backupPaths {
+			if strings.HasPrefix(dataRoot, p) || strings.HasPrefix(p, dataRoot) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			if info, err := os.Stat(dataRoot); err == nil && info.IsDir() {
+				backupPaths[dataRoot] = "data"
+			}
+		}
+	}
 
+	// Copy files from all backup paths
+	for expanded, prefix := range backupPaths {
 		filepath.Walk(expanded, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
 				return nil
 			}
 			relPath, _ := filepath.Rel(expanded, path)
-			w, _ := zw.Create(filepath.Join("files", relPath))
+			w, _ := zw.Create(filepath.Join(prefix, relPath))
 			f, err := os.Open(path)
 			if err != nil {
 				return nil
@@ -156,6 +183,12 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 
 	zw.Close()
 
+	// Verify backup is not empty (metadata.json alone is ~200 bytes)
+	if buf.Len() < 100 {
+		e.LogActivity(domain, "backup", "backup appears empty", "failed")
+		return 0, fmt.Errorf("backup verification failed: backup is empty")
+	}
+
 	// Upload
 	if err := store.Upload(ctx, zipKey, bytes.NewReader(buf.Bytes())); err != nil {
 		return 0, fmt.Errorf("upload backup: %w", err)
@@ -169,6 +202,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		return 0, fmt.Errorf("record backup: %w", err)
 	}
 
+	e.LogActivity(domain, "backup", fmt.Sprintf("created backup #%d (%d bytes)", id, buf.Len()), "success")
 	return id, nil
 }
 
@@ -208,18 +242,36 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 		return fmt.Errorf("open zip: %w", err)
 	}
 
-	siteRoot := filepath.Join(e.dataDir, "sites", domain, "files")
+	site, _ := e.db.GetSite(domain)
+	siteRoot, dataRoot := e.SiteDir(site.Owner, domain)
 
 	for _, f := range zr.File {
+		// Restore site files
 		if strings.HasPrefix(f.Name, "files/") {
 			relPath := strings.TrimPrefix(f.Name, "files/")
 			if relPath == "" {
 				continue
 			}
-			// Prevent zip slip: ensure extracted path stays within siteRoot
 			destPath := filepath.Join(siteRoot, relPath)
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(siteRoot)+string(filepath.Separator)) {
-				continue // skip files that would escape the site root
+				continue
+			}
+			os.MkdirAll(filepath.Dir(destPath), 0755)
+			rc, _ := f.Open()
+			dest, _ := os.Create(destPath)
+			io.Copy(dest, rc)
+			dest.Close()
+			rc.Close()
+		}
+		// Restore data directory (volumes)
+		if strings.HasPrefix(f.Name, "data/") {
+			relPath := strings.TrimPrefix(f.Name, "data/")
+			if relPath == "" {
+				continue
+			}
+			destPath := filepath.Join(dataRoot, relPath)
+			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(dataRoot)+string(filepath.Separator)) {
+				continue
 			}
 			os.MkdirAll(filepath.Dir(destPath), 0755)
 			rc, _ := f.Open()
