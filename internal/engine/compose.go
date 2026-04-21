@@ -105,26 +105,36 @@ func discoverComposeServices(composeFile string) ([]string, error) {
 	return names, nil
 }
 
-// generateComposeOverride creates docker-compose.override.yml that adds apod
-// labels, security hardening, and resource limits to every service.
-// This makes compose containers work identically to normal apod containers.
-func generateComposeOverride(compDir, domain string, services []string, comp *models.DriverCompose, memoryMB int64, cpus float64, pidsLimit int64) error {
-	numServices := len(services)
-	if numServices == 0 {
-		return nil
+// setupComposeCgroup creates a shared cgroup for all containers in a compose site.
+// All services share a single memory/PID pool instead of per-container limits.
+func setupComposeCgroup(project string, memoryMB int64, pidsLimit int64) (string, error) {
+	cgroupBase := "/sys/fs/cgroup/apod"
+	cgroupPath := filepath.Join(cgroupBase, project)
+
+	// Create cgroup hierarchy
+	os.MkdirAll(cgroupBase, 0755)
+	// Enable memory and pids controllers on the parent
+	os.WriteFile(filepath.Join(cgroupBase, "cgroup.subtree_control"), []byte("+memory +pids"), 0644)
+	os.MkdirAll(cgroupPath, 0755)
+
+	// Set shared limits — all containers in the pool compete for these
+	if memoryMB > 0 {
+		memBytes := memoryMB * 1024 * 1024
+		os.WriteFile(filepath.Join(cgroupPath, "memory.max"), []byte(strconv.FormatInt(memBytes, 10)), 0644)
+	}
+	if pidsLimit > 0 {
+		os.WriteFile(filepath.Join(cgroupPath, "pids.max"), []byte(strconv.FormatInt(pidsLimit, 10)), 0644)
 	}
 
-	// Distribute resources across services
-	perServiceMemMB := memoryMB / int64(numServices)
-	if perServiceMemMB < 64 {
-		perServiceMemMB = 64 // minimum 64MB per service
-	}
-	perServiceCPUs := cpus / float64(numServices)
-	if perServiceCPUs < 0.1 {
-		perServiceCPUs = 0.1
-	}
-	if pidsLimit == 0 {
-		pidsLimit = 512
+	return cgroupPath, nil
+}
+
+// generateComposeOverride creates docker-compose.override.yml that adds apod
+// labels, security hardening, and shared resource pool to every service.
+// All containers share a single cgroup for memory/PIDs — no per-container splitting.
+func generateComposeOverride(compDir, domain, project string, services []string, comp *models.DriverCompose, cgroupParent string) error {
+	if len(services) == 0 {
+		return nil
 	}
 
 	var override strings.Builder
@@ -139,24 +149,21 @@ func generateComposeOverride(compDir, domain string, services []string, comp *mo
 		override.WriteString(fmt.Sprintf("      - \"apod.site=%s\"\n", domain))
 		override.WriteString(fmt.Sprintf("      - \"apod.service=%s\"\n", svc))
 		override.WriteString("      - \"apod.managed=true\"\n")
-
-		// Mark shell service
 		if comp.ShellService != "" && svc == comp.ShellService {
 			override.WriteString("      - \"apod.shell=true\"\n")
 		}
 
-		// Resource limits
-		override.WriteString(fmt.Sprintf("    mem_limit: %dm\n", perServiceMemMB))
-		override.WriteString(fmt.Sprintf("    cpus: %.2f\n", perServiceCPUs))
-		override.WriteString(fmt.Sprintf("    pids_limit: %d\n", pidsLimit))
+		// Shared resource pool via cgroup parent
+		if cgroupParent != "" {
+			override.WriteString(fmt.Sprintf("    cgroup_parent: %s\n", cgroupParent))
+		}
 
 		// Security hardening
 		override.WriteString("    security_opt:\n")
 		override.WriteString("      - no-new-privileges:true\n")
 	}
 
-	overridePath := filepath.Join(compDir, "docker-compose.override.yml")
-	return os.WriteFile(overridePath, []byte(override.String()), 0644)
+	return os.WriteFile(filepath.Join(compDir, "docker-compose.override.yml"), []byte(override.String()), 0644)
 }
 
 // CreateComposeSite creates a site using docker compose
@@ -249,27 +256,31 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		return fmt.Errorf("sanitize compose file: %w", err)
 	}
 
-	// Discover services and generate override with labels + limits + security
+	// Discover services and set up shared resource pool
 	services, err := discoverComposeServices(composeFile)
 	if err != nil {
 		return fmt.Errorf("discover services: %w", err)
 	}
 
+	project := composeProjectName(opts.Domain)
+
 	memoryMB := parseMemoryMB(opts.RAM)
 	if memoryMB == 0 {
-		memoryMB = 2048 // default 2G for compose sites
+		memoryMB = 2048
 	}
-	cpus, _ := strconv.ParseFloat(opts.CPU, 64)
-	if cpus == 0 {
-		cpus = 2 // default 2 CPUs for compose sites
+	totalPids := int64(512) * int64(len(services)) // 512 per service as total pool
+
+	// Create shared cgroup — all containers compete for the same pool
+	cgroupParent := ""
+	if _, err := setupComposeCgroup(project, memoryMB, totalPids); err == nil {
+		cgroupParent = "apod/" + project
 	}
 
-	if err := generateComposeOverride(compDir, opts.Domain, services, comp, memoryMB, cpus, 512); err != nil {
+	if err := generateComposeOverride(compDir, opts.Domain, project, services, comp, cgroupParent); err != nil {
 		return fmt.Errorf("generate override: %w", err)
 	}
 
 	// Start compose (automatically picks up override file)
-	project := composeProjectName(opts.Domain)
 	cmd := composeCmd(ctx, project, compDir, "up", "-d")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose up: %s: %w", string(output), err)
@@ -340,6 +351,10 @@ func (e *Engine) DestroyComposeSite(ctx context.Context, domain, owner string) e
 
 	// Remove Traefik routing config
 	os.Remove(filepath.Join("/etc/apod/traefik/dynamic", domain+".toml"))
+
+	// Remove shared cgroup
+	os.Remove(filepath.Join("/sys/fs/cgroup/apod", project))
+
 	return nil
 }
 
