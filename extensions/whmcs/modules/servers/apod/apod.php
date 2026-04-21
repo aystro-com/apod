@@ -10,6 +10,14 @@
  *   - Port: 8443 (or your TCP listener port)
  *   - Password: admin API key (from `apod user create`)
  *
+ * Product ConfigOptions:
+ *   1. Driver (php, laravel, wordpress, node, static, odoo, unifi)
+ *   2. RAM (256M, 512M, 1G, 2G)
+ *   3. CPU (1, 2, 4)
+ *   4. Storage (1G, 5G, 10G, 50G)
+ *   5. SSH Access (yes/no) — gives customer shell access
+ *   6. Backups (yes/no) — allows customer to create/restore backups
+ *
  * @see https://github.com/aystro-com/apod
  */
 
@@ -56,6 +64,14 @@ function apod_ConfigOptions()
             'Default' => '5G',
             'Description' => 'Disk quota (e.g., 1G, 5G, 10G)',
         ],
+        'SSH Access' => [
+            'Type' => 'yesno',
+            'Description' => 'Allow SSH/shell access to the container',
+        ],
+        'Backups' => [
+            'Type' => 'yesno',
+            'Description' => 'Allow customer to create and restore backups',
+        ],
     ];
 }
 
@@ -66,6 +82,7 @@ function apod_CreateAccount(array $params)
         return 'Domain is required';
     }
 
+    // Create the site
     $response = apod_request($params, '/sites', 'POST', [
         'domain' => $domain,
         'driver' => $params['configoption1'] ?: 'php',
@@ -78,22 +95,37 @@ function apod_CreateAccount(array $params)
         return $response['error'];
     }
 
-    // Store SSH/SFTP credentials for the client
-    // The site's Linux user is derived from the domain
+    // Generate SSH username from domain
     $sshUser = preg_replace('/[^a-z0-9\-]/', '-', strtolower($domain));
     $sshUser = substr(trim($sshUser, '-'), 0, 32);
     if (!preg_match('/^[a-z]/', $sshUser)) {
         $sshUser = 'u-' . $sshUser;
     }
 
-    // Save username to service
+    // If SSH access is enabled, create a Linux user with shell access
+    $sshEnabled = !empty($params['configoption5']);
+    if ($sshEnabled) {
+        // Create user via apod API (gives them SFTP + shell)
+        $userResp = apod_request($params, '/users', 'POST', [
+            'name' => $sshUser,
+            'role' => 'user',
+        ]);
+        // Store the API key if created
+        if (!$userResp['error'] && isset($userResp['data']['api_key'])) {
+            try {
+                \WHMCS\Database\Capsule::table('tblhosting')
+                    ->where('id', $params['serviceid'])
+                    ->update(['password' => encrypt($userResp['data']['api_key'])]);
+            } catch (\Exception $e) {}
+        }
+    }
+
+    // Save username
     try {
         \WHMCS\Database\Capsule::table('tblhosting')
             ->where('id', $params['serviceid'])
             ->update(['username' => $sshUser]);
-    } catch (\Exception $e) {
-        // Non-critical
-    }
+    } catch (\Exception $e) {}
 
     return 'success';
 }
@@ -137,17 +169,23 @@ function apod_TerminateAccount(array $params)
         return 'Domain is required';
     }
 
+    // Destroy the site
     $response = apod_request($params, '/sites/' . $domain, 'DELETE');
-
     if ($response['error'] && !str_contains($response['error'], 'not found')) {
         return $response['error'];
+    }
+
+    // Delete the Linux user if exists
+    $username = $params['username'] ?? '';
+    if (!empty($username)) {
+        apod_request($params, '/users/' . $username, 'DELETE');
     }
 
     return 'success';
 }
 
 /**
- * Client area actions — buttons shown to the customer
+ * Client area — shows site info, SFTP details, backups
  */
 function apod_ClientArea(array $params)
 {
@@ -157,6 +195,8 @@ function apod_ClientArea(array $params)
     }
 
     $serverHost = $params['serverhostname'] ?: $params['serverip'];
+    $sshEnabled = !empty($params['configoption5']);
+    $backupsEnabled = !empty($params['configoption6']);
 
     // Get site status
     $response = apod_request($params, '/sites/' . $domain . '/monitor', 'GET');
@@ -167,23 +207,53 @@ function apod_ClientArea(array $params)
         ? '<span class="label label-success">Running</span>'
         : '<span class="label label-danger">' . ucfirst($status) . '</span>';
 
-    $html = '<div class="row">';
-    $html .= '<div class="col-sm-4"><strong>Status:</strong> ' . $statusBadge . '</div>';
-    $html .= '<div class="col-sm-4"><strong>CPU:</strong> ' . round($stats['cpu_percent'] ?? 0, 1) . '%</div>';
-    $html .= '<div class="col-sm-4"><strong>RAM:</strong> ' . round($stats['memory_mb'] ?? 0) . 'MB / ' . round($stats['memory_limit_mb'] ?? 0) . 'MB</div>';
+    // Site overview
+    $html = '<h4>Site Overview</h4>';
+    $html .= '<div class="row">';
+    $html .= '<div class="col-sm-3"><strong>Status:</strong> ' . $statusBadge . '</div>';
+    $html .= '<div class="col-sm-3"><strong>CPU:</strong> ' . round($stats['cpu_percent'] ?? 0, 1) . '%</div>';
+    $html .= '<div class="col-sm-3"><strong>RAM:</strong> ' . round($stats['memory_mb'] ?? 0) . 'MB / ' . round($stats['memory_limit_mb'] ?? 0) . 'MB</div>';
+    $html .= '<div class="col-sm-3"><strong>Driver:</strong> ' . htmlspecialchars($params['configoption1'] ?? 'php') . '</div>';
     $html .= '</div>';
 
-    // SSH/SFTP access info
-    $html .= '<div class="row" style="margin-top:20px">';
-    $html .= '<div class="col-sm-12"><h4>SFTP / SSH Access</h4></div>';
-    $html .= '<div class="col-sm-4"><strong>Host:</strong> ' . htmlspecialchars($serverHost) . '</div>';
-    $html .= '<div class="col-sm-4"><strong>Username:</strong> ' . htmlspecialchars($params['username'] ?? '-') . '</div>';
-    $html .= '<div class="col-sm-4"><strong>Port:</strong> 22</div>';
-    $html .= '</div>';
-    $html .= '<p class="text-muted" style="margin-top:5px">Use your SFTP client (FileZilla, WinSCP) to upload files to your site.</p>';
+    // SSH/SFTP access
+    if ($sshEnabled) {
+        $html .= '<hr><h4>SSH / SFTP Access</h4>';
+        $html .= '<div class="row">';
+        $html .= '<div class="col-sm-4"><strong>Host:</strong> <code>' . htmlspecialchars($serverHost) . '</code></div>';
+        $html .= '<div class="col-sm-4"><strong>Username:</strong> <code>' . htmlspecialchars($params['username'] ?? '-') . '</code></div>';
+        $html .= '<div class="col-sm-4"><strong>Port:</strong> <code>22</code></div>';
+        $html .= '</div>';
+        $html .= '<p class="text-muted" style="margin-top:10px">Connect via SSH or SFTP to manage your files directly. Your files are at <code>/sites/' . htmlspecialchars($domain) . '/files/</code></p>';
+    }
+
+    // Backups
+    if ($backupsEnabled) {
+        $html .= '<hr><h4>Backups</h4>';
+
+        $backupResp = apod_request($params, '/sites/' . $domain . '/backups', 'GET');
+        $backups = $backupResp['data'] ?? [];
+
+        if (is_array($backups) && count($backups) > 0) {
+            $html .= '<table class="table table-condensed table-striped">';
+            $html .= '<thead><tr><th>ID</th><th>Storage</th><th>Size</th><th>Date</th></tr></thead><tbody>';
+            foreach ($backups as $b) {
+                $size = isset($b['size_bytes']) ? round($b['size_bytes'] / 1024 / 1024, 1) . ' MB' : '-';
+                $html .= '<tr>';
+                $html .= '<td>' . ($b['id'] ?? '-') . '</td>';
+                $html .= '<td>' . ($b['storage_name'] ?? 'local') . '</td>';
+                $html .= '<td>' . $size . '</td>';
+                $html .= '<td>' . ($b['created_at'] ?? '-') . '</td>';
+                $html .= '</tr>';
+            }
+            $html .= '</tbody></table>';
+        } else {
+            $html .= '<p class="text-muted">No backups yet.</p>';
+        }
+    }
 
     // Actions
-    $html .= '<div class="row" style="margin-top:20px">';
+    $html .= '<hr><div class="row" style="margin-top:10px">';
     $html .= '<div class="col-sm-12">';
     $html .= '<a href="https://' . htmlspecialchars($domain) . '" target="_blank" class="btn btn-primary">Visit Site</a> ';
     $html .= '</div>';
@@ -193,13 +263,21 @@ function apod_ClientArea(array $params)
 }
 
 /**
- * Client area custom button actions
+ * Client area buttons — based on product config
  */
-function apod_ClientAreaCustomButtonArray()
+function apod_ClientAreaCustomButtonArray(array $params = [])
 {
-    return [
+    $buttons = [
         'Restart Site' => 'restart',
     ];
+
+    // Backups enabled
+    if (!empty($params['configoption6'])) {
+        $buttons['Create Backup'] = 'createBackup';
+        $buttons['Restore Latest Backup'] = 'restoreBackup';
+    }
+
+    return $buttons;
 }
 
 function apod_restart(array $params)
@@ -210,7 +288,60 @@ function apod_restart(array $params)
     }
 
     $response = apod_request($params, '/sites/' . $domain . '/restart', 'POST');
+    if ($response['error']) {
+        return $response['error'];
+    }
 
+    return 'success';
+}
+
+function apod_createBackup(array $params)
+{
+    $domain = $params['domain'];
+    if (empty($domain)) {
+        return 'Domain is required';
+    }
+    if (empty($params['configoption6'])) {
+        return 'Backups are not enabled for this product';
+    }
+
+    $response = apod_request($params, '/sites/' . $domain . '/backups', 'POST', [
+        'storage' => 'local',
+    ]);
+    if ($response['error']) {
+        return $response['error'];
+    }
+
+    return 'success';
+}
+
+function apod_restoreBackup(array $params)
+{
+    $domain = $params['domain'];
+    if (empty($domain)) {
+        return 'Domain is required';
+    }
+    if (empty($params['configoption6'])) {
+        return 'Backups are not enabled for this product';
+    }
+
+    // Get latest backup
+    $listResp = apod_request($params, '/sites/' . $domain . '/backups', 'GET');
+    $backups = $listResp['data'] ?? [];
+
+    if (empty($backups)) {
+        return 'No backups available to restore';
+    }
+
+    // Restore the most recent one
+    $latestId = end($backups)['id'] ?? null;
+    if (!$latestId) {
+        return 'No backup ID found';
+    }
+
+    $response = apod_request($params, '/sites/' . $domain . '/backups/restore', 'POST', [
+        'backup_id' => $latestId,
+    ]);
     if ($response['error']) {
         return $response['error'];
     }
@@ -225,11 +356,12 @@ function apod_AdminCustomButtonArray()
 {
     return [
         'Restart Site' => 'restart',
+        'Create Backup' => 'createBackup',
     ];
 }
 
 /**
- * Admin service info panel — shows site details in admin area
+ * Admin service info panel
  */
 function apod_AdminServicesTabFields(array $params)
 {
@@ -241,15 +373,22 @@ function apod_AdminServicesTabFields(array $params)
     $response = apod_request($params, '/sites/' . $domain, 'GET');
     $site = $response['data'] ?? [];
 
-    return [
+    $fields = [
         'Site URL' => '<a href="https://' . htmlspecialchars($domain) . '" target="_blank">https://' . htmlspecialchars($domain) . '</a>',
         'Driver' => $site['driver'] ?? '-',
         'Status' => $site['status'] ?? '-',
         'RAM' => $site['ram'] ?? '-',
         'CPU' => $site['cpu'] ?? '-',
         'Storage' => $site['storage'] ?? '-',
+        'Owner' => $site['owner'] ?? '(admin)',
         'Created' => $site['created_at'] ?? '-',
     ];
+
+    // Show SSH access status
+    $fields['SSH Access'] = !empty($params['configoption5']) ? 'Enabled' : 'Disabled';
+    $fields['Backups'] = !empty($params['configoption6']) ? 'Enabled' : 'Disabled';
+
+    return $fields;
 }
 
 /**
