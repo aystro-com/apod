@@ -211,6 +211,14 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		return fmt.Errorf("ensure network: %w", err)
 	}
 
+	// Create per-site isolated network (only this site's containers + Traefik)
+	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(opts.Domain, ".", "-"))
+	if err := e.docker.EnsureNetwork(ctx, siteNetwork); err != nil {
+		return fmt.Errorf("ensure site network: %w", err)
+	}
+	// Connect Traefik to this site's network so it can route traffic
+	e.docker.ConnectNetwork(ctx, siteNetwork, "apod-traefik")
+
 	memoryMB := parseMemoryMB(site.RAM)
 	cpus, _ := strconv.ParseFloat(site.CPU, 64)
 
@@ -247,6 +255,9 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		if svcName == "app" && len(svc.Ports) > 0 {
 			port := svc.Ports[0]
 			traefikLabels := TraefikLabels(opts.Domain, []string{opts.Domain}, port, svc.BackendScheme)
+			// Tell Traefik to use the site-specific network to reach this container
+			routerName := strings.ReplaceAll(opts.Domain, ".", "-")
+			traefikLabels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", routerName)] = port
 			for k, v := range traefikLabels {
 				labels[k] = v
 			}
@@ -267,7 +278,8 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 			return fmt.Errorf("create container %s: %w", containerName, err)
 		}
 
-		if err := e.docker.ConnectNetwork(ctx, apodNetwork, id); err != nil {
+		// Connect to site-specific isolated network (not the shared apod-net)
+		if err := e.docker.ConnectNetwork(ctx, siteNetwork, id); err != nil {
 			e.db.UpdateSiteStatus(opts.Domain, "error")
 			return fmt.Errorf("connect container to network: %w", err)
 		}
@@ -340,6 +352,10 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	if err := e.db.DeleteSite(domain); err != nil {
 		return fmt.Errorf("delete site record: %w", err)
 	}
+
+	// Remove site-specific network
+	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
+	e.docker.RemoveNetwork(ctx, siteNetwork)
 
 	if purge {
 		siteDir := filepath.Join(e.dataDir, "sites", domain)

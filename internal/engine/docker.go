@@ -87,7 +87,9 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		})
 	}
 
-	resources := container.Resources{}
+	resources := container.Resources{
+		PidsLimit: func() *int64 { v := int64(256); return &v }(),
+	}
 	if cfg.MemoryMB > 0 {
 		resources.Memory = cfg.MemoryMB * 1024 * 1024
 	}
@@ -124,6 +126,9 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 			Resources:     resources,
 			RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 			PortBindings:  portBindings,
+			SecurityOpt:   []string{"no-new-privileges:true"},
+			CapDrop:       []string{"ALL"},
+			CapAdd:        []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE"},
 		},
 		&network.NetworkingConfig{},
 		nil,
@@ -195,6 +200,10 @@ func (d *Docker) EnsureNetwork(ctx context.Context, name string) error {
 
 func (d *Docker) ConnectNetwork(ctx context.Context, networkName, containerID string) error {
 	return d.cli.NetworkConnect(ctx, networkName, containerID, nil)
+}
+
+func (d *Docker) RemoveNetwork(ctx context.Context, name string) error {
+	return d.cli.NetworkRemove(ctx, name)
 }
 
 func (d *Docker) ExecInContainer(ctx context.Context, containerID string, cmd []string) (string, error) {
