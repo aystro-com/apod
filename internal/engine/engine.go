@@ -347,6 +347,17 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		}
 	}
 
+	// Restart all containers after setup to pick up any DB changes (roles, schemas, etc.)
+	if len(driver.Setup) > 0 {
+		allIDs, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", opts.Domain)
+		for _, id := range allIDs {
+			e.docker.StopContainer(ctx, id)
+		}
+		for _, id := range allIDs {
+			e.docker.StartContainer(ctx, id)
+		}
+	}
+
 	e.db.UpdateSiteStatus(opts.Domain, "running")
 
 	// Register primary domain
