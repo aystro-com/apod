@@ -51,6 +51,16 @@ func New(cfg Config) (*Engine, error) {
 		cfg.DriverDir = defaultDriverDir
 	}
 
+	// Ensure all required directories exist on startup
+	for _, dir := range []string{
+		cfg.DataDir,
+		cfg.DriverDir,
+		filepath.Dir(cfg.DBPath),
+		"/etc/apod/traefik/dynamic",
+	} {
+		os.MkdirAll(dir, 0755)
+	}
+
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -145,7 +155,19 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	}
 
 	if err := e.db.CreateSite(site); err != nil {
-		return fmt.Errorf("create site record: %w", err)
+		// If domain exists from a failed previous create, clean it up and retry
+		if existing, _ := e.db.GetSite(opts.Domain); existing != nil {
+			if existing.Status == "creating" || existing.Status == "error" {
+				e.db.DeleteSite(opts.Domain)
+				if err := e.db.CreateSite(site); err != nil {
+					return fmt.Errorf("create site record: %w", err)
+				}
+			} else {
+				return fmt.Errorf("site %q already exists (status: %s)", opts.Domain, existing.Status)
+			}
+		} else {
+			return fmt.Errorf("create site record: %w", err)
+		}
 	}
 
 	siteRoot, dataRoot := e.SiteDir(opts.Owner, opts.Domain)
