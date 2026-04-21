@@ -97,6 +97,9 @@ func New(e *engine.Engine) *Server {
 		// Container logs
 		r.Get("/sites/{domain}/container-logs", h.ContainerLogsHandler)
 
+		// Terminal (secure token-based container exec)
+		r.Post("/sites/{domain}/terminal", h.CreateTerminalTokenHandler)
+
 		// Clone
 		r.Post("/sites/{domain}/clone", h.CloneSiteHandler)
 
@@ -156,6 +159,9 @@ func New(e *engine.Engine) *Server {
 			r.Post("/users/{name}/reset-key", h.ResetAPIKeyHandler)
 		})
 	})
+
+	// Terminal exec — token-based, no API key needed (token IS auth)
+	r.Post("/api/v1/terminal/exec", h.TerminalExecHandler)
 
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)
 

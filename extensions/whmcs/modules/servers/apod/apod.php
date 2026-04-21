@@ -64,9 +64,9 @@ function apod_ConfigOptions()
             'Default' => '5G',
             'Description' => 'Disk quota (e.g., 1G, 5G, 10G)',
         ],
-        'SSH Access' => [
+        'Shell Access' => [
             'Type' => 'yesno',
-            'Description' => 'Allow SSH/shell access to the container',
+            'Description' => 'Allow web terminal access to the container (fully isolated)',
         ],
         'Backups' => [
             'Type' => 'yesno',
@@ -94,38 +94,6 @@ function apod_CreateAccount(array $params)
     if ($response['error']) {
         return $response['error'];
     }
-
-    // Generate SSH username from domain
-    $sshUser = preg_replace('/[^a-z0-9\-]/', '-', strtolower($domain));
-    $sshUser = substr(trim($sshUser, '-'), 0, 32);
-    if (!preg_match('/^[a-z]/', $sshUser)) {
-        $sshUser = 'u-' . $sshUser;
-    }
-
-    // If SSH access is enabled, create a Linux user with shell access
-    $sshEnabled = !empty($params['configoption5']);
-    if ($sshEnabled) {
-        // Create user via apod API (gives them SFTP + shell)
-        $userResp = apod_request($params, '/users', 'POST', [
-            'name' => $sshUser,
-            'role' => 'user',
-        ]);
-        // Store the API key if created
-        if (!$userResp['error'] && isset($userResp['data']['api_key'])) {
-            try {
-                \WHMCS\Database\Capsule::table('tblhosting')
-                    ->where('id', $params['serviceid'])
-                    ->update(['password' => encrypt($userResp['data']['api_key'])]);
-            } catch (\Exception $e) {}
-        }
-    }
-
-    // Save username
-    try {
-        \WHMCS\Database\Capsule::table('tblhosting')
-            ->where('id', $params['serviceid'])
-            ->update(['username' => $sshUser]);
-    } catch (\Exception $e) {}
 
     return 'success';
 }
@@ -169,16 +137,9 @@ function apod_TerminateAccount(array $params)
         return 'Domain is required';
     }
 
-    // Destroy the site
     $response = apod_request($params, '/sites/' . $domain, 'DELETE');
     if ($response['error'] && !str_contains($response['error'], 'not found')) {
         return $response['error'];
-    }
-
-    // Delete the Linux user if exists
-    $username = $params['username'] ?? '';
-    if (!empty($username)) {
-        apod_request($params, '/users/' . $username, 'DELETE');
     }
 
     return 'success';
@@ -195,7 +156,7 @@ function apod_ClientArea(array $params)
     }
 
     $serverHost = $params['serverhostname'] ?: $params['serverip'];
-    $sshEnabled = !empty($params['configoption5']);
+    $shellEnabled = !empty($params['configoption5']);
     $backupsEnabled = !empty($params['configoption6']);
 
     // Get site status
@@ -216,15 +177,10 @@ function apod_ClientArea(array $params)
     $html .= '<div class="col-sm-3"><strong>Driver:</strong> ' . htmlspecialchars($params['configoption1'] ?? 'php') . '</div>';
     $html .= '</div>';
 
-    // SSH/SFTP access
-    if ($sshEnabled) {
-        $html .= '<hr><h4>SSH / SFTP Access</h4>';
-        $html .= '<div class="row">';
-        $html .= '<div class="col-sm-4"><strong>Host:</strong> <code>' . htmlspecialchars($serverHost) . '</code></div>';
-        $html .= '<div class="col-sm-4"><strong>Username:</strong> <code>' . htmlspecialchars($params['username'] ?? '-') . '</code></div>';
-        $html .= '<div class="col-sm-4"><strong>Port:</strong> <code>22</code></div>';
-        $html .= '</div>';
-        $html .= '<p class="text-muted" style="margin-top:10px">Connect via SSH or SFTP to manage your files directly. Your files are at <code>/sites/' . htmlspecialchars($domain) . '/files/</code></p>';
+    // Container shell access (web terminal)
+    if ($shellEnabled) {
+        $html .= '<hr><h4>Container Shell</h4>';
+        $html .= '<p>Access your site\'s container directly via web terminal. All commands run inside your isolated container — fully sandboxed from other sites.</p>';
     }
 
     // Backups
@@ -271,13 +227,40 @@ function apod_ClientAreaCustomButtonArray(array $params = [])
         'Restart Site' => 'restart',
     ];
 
-    // Backups enabled
+    // Shell access
+    if (!empty($params['configoption5'])) {
+        $buttons['Open Terminal'] = 'openTerminal';
+    }
+
+    // Backups
     if (!empty($params['configoption6'])) {
         $buttons['Create Backup'] = 'createBackup';
         $buttons['Restore Latest Backup'] = 'restoreBackup';
     }
 
     return $buttons;
+}
+
+function apod_openTerminal(array $params)
+{
+    $domain = $params['domain'];
+    if (empty($domain)) {
+        return 'Domain is required';
+    }
+    if (empty($params['configoption5'])) {
+        return 'Shell access is not enabled for this product';
+    }
+
+    // Execute a command in the container via the API
+    // For web terminal, this would redirect to a websocket terminal
+    // For now, return a URL that the admin/customer can use
+    $serverHost = $params['serverhostname'] ?: $params['serverip'];
+    $port = $params['serverport'] ?: '8443';
+    $scheme = $params['serversecure'] ? 'https' : 'http';
+
+    // The actual web terminal would be served by apod at this URL
+    header('Location: ' . $scheme . '://' . $serverHost . ':' . $port . '/terminal/' . $domain);
+    exit;
 }
 
 function apod_restart(array $params)
@@ -384,8 +367,7 @@ function apod_AdminServicesTabFields(array $params)
         'Created' => $site['created_at'] ?? '-',
     ];
 
-    // Show SSH access status
-    $fields['SSH Access'] = !empty($params['configoption5']) ? 'Enabled' : 'Disabled';
+    $fields['Shell Access'] = !empty($params['configoption5']) ? 'Enabled (container only)' : 'Disabled';
     $fields['Backups'] = !empty($params['configoption6']) ? 'Enabled' : 'Disabled';
 
     return $fields;

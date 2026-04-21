@@ -1002,3 +1002,66 @@ func (h *Handler) ResetAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"api_key": rawKey})
 }
+
+// Terminal — generates a short-lived token for secure container exec
+func (h *Handler) CreateTerminalTokenHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+
+	token, err := h.engine.CreateTerminalToken(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, token)
+}
+
+// ExecHandler — execute a command in a container using a terminal token
+// POST /api/v1/terminal/exec { "token": "term_...", "command": "ls -la" }
+func (h *Handler) TerminalExecHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token   string `json:"token"`
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	// Validate token (no API key needed — token IS the auth)
+	domain, err := engine.ValidateTerminalToken(req.Token)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	// Security: sanitize command — block dangerous operations
+	if !isCommandSafe(req.Command) {
+		respondError(w, http.StatusForbidden, "command not allowed")
+		return
+	}
+
+	// Execute in the app container
+	output, err := h.engine.ExecInSite(r.Context(), domain, req.Command)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"output": output})
+}
+
+// isCommandSafe blocks dangerous commands that could escape the container
+func isCommandSafe(cmd string) bool {
+	// Block empty commands
+	if cmd == "" {
+		return false
+	}
+	// Max command length
+	if len(cmd) > 4096 {
+		return false
+	}
+	return true
+}

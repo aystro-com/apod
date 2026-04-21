@@ -739,6 +739,15 @@ Error responses:
 | `DELETE` | `/api/v1/users/{name}` | Delete user | |
 | `POST` | `/api/v1/users/{name}/reset-key` | Reset API key | |
 
+### Terminal (secure container exec)
+
+| Method | Endpoint | Description | Body |
+|--------|----------|-------------|------|
+| `POST` | `/api/v1/sites/{domain}/terminal` | Generate exec token (5min TTL) | |
+| `POST` | `/api/v1/terminal/exec` | Execute command with token | `{"token": "term_...", "command": "ls"}` |
+
+Token-based access — no API key needed for exec, the token IS the auth. Tokens expire after 5 minutes and are single-domain scoped. Commands run inside the site's app container only.
+
 ### Activity Log
 
 | Method | Endpoint | Description |
@@ -810,6 +819,52 @@ internal/
   storage/             Backup storage drivers (local, S3, R2, SFTP)
 drivers/               Built-in driver YAML files
 ```
+
+---
+
+## Billing Integrations
+
+apod ships with billing panel modules for automated provisioning. Customers purchase hosting plans, and sites are created/suspended/terminated automatically.
+
+### WHMCS
+
+Install: copy `extensions/whmcs/modules/servers/apod/` to your WHMCS `/modules/servers/` directory.
+
+**Server setup**: Add a server with hostname, port (8443), and admin API key as password.
+
+**Product ConfigOptions** (1-6):
+1. Driver (php, laravel, wordpress, node, odoo, etc.)
+2. RAM limit (256M, 512M, 1G)
+3. CPU cores (1, 2, 4)
+4. Storage quota (1G, 5G, 10G)
+5. Shell Access (yes/no) — web terminal to container
+6. Backups (yes/no) — customer can create/restore backups
+
+**Features:**
+- Auto-provision on payment
+- Suspend/unsuspend/terminate
+- Client area: site stats, resource usage, backup list, restart button
+- Admin area: site details, driver info, quick actions
+- Web terminal: secure token-based container exec (no host access)
+
+### Paymenter
+
+Install: copy `extensions/paymenter/Apod.php` to your Paymenter `/extensions/Servers/Apod/` directory.
+
+Same provisioning lifecycle — create, suspend, unsuspend, terminate via apod's REST API.
+
+---
+
+## Security Model
+
+- **Container isolation**: Every site runs in its own Docker container with resource limits (RAM, CPU, disk)
+- **No host access**: Billing customers only access their container — never the host system
+- **Web terminal**: Token-based (5min TTL), scoped to a single container, commands run inside Docker only
+- **Multi-user**: Linux user isolation with SFTP chroot for admin/agency users
+- **API auth**: SHA-256 hashed API keys, role-based (admin vs user)
+- **Ownership**: Users can only see/manage their own sites
+- **Disk quotas**: Kernel-enforced via Linux `setquota`
+- **SSL**: Automatic Let's Encrypt via Traefik
 
 ---
 
