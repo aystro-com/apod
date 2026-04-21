@@ -60,14 +60,44 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		}
 	}
 
-	// Generate .env file from driver vars
-	envContent := ""
-	for envKey, varRef := range comp.Env {
-		// varRef is like "${site_db_pass}" or a literal value
-		value := expandVariables(varRef, vars)
-		envContent += envKey + "=" + value + "\n"
+	// Generate .env: start from .env.example if it exists, then override with driver vars
+	envPath := filepath.Join(compDir, ".env")
+	envExamplePath := filepath.Join(compDir, ".env.example")
+
+	envMap := make(map[string]string)
+	envOrder := []string{}
+
+	// Read .env.example as base
+	if data, err := os.ReadFile(envExamplePath); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if idx := strings.IndexByte(line, '='); idx > 0 {
+				key := line[:idx]
+				val := line[idx+1:]
+				envMap[key] = val
+				envOrder = append(envOrder, key)
+			}
+		}
 	}
-	if err := os.WriteFile(filepath.Join(compDir, ".env"), []byte(envContent), 0600); err != nil {
+
+	// Override with driver-specified env vars
+	for envKey, varRef := range comp.Env {
+		value := expandVariables(varRef, vars)
+		if _, exists := envMap[envKey]; !exists {
+			envOrder = append(envOrder, envKey)
+		}
+		envMap[envKey] = value
+	}
+
+	// Write .env preserving order
+	var envContent strings.Builder
+	for _, key := range envOrder {
+		envContent.WriteString(key + "=" + envMap[key] + "\n")
+	}
+	if err := os.WriteFile(envPath, []byte(envContent.String()), 0600); err != nil {
 		return fmt.Errorf("write compose .env: %w", err)
 	}
 
