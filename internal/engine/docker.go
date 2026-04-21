@@ -60,7 +60,8 @@ type ContainerConfig struct {
 	Command     string
 	Args        []string // raw args passed directly (not through sh -c)
 	Ports       map[string]string // container_port -> host_port
-	User        string // UID:GID to run container as (e.g., "5001:5001")
+	User        string            // UID:GID to run container as (e.g., "5001:5001")
+	PidsLimit   int64             // max processes (default 512)
 }
 
 func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (string, error) {
@@ -87,8 +88,12 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		})
 	}
 
+	pidsLimit := int64(512)
+	if cfg.PidsLimit > 0 {
+		pidsLimit = cfg.PidsLimit
+	}
 	resources := container.Resources{
-		PidsLimit: func() *int64 { v := int64(512); return &v }(),
+		PidsLimit: &pidsLimit,
 	}
 	if cfg.MemoryMB > 0 {
 		resources.Memory = cfg.MemoryMB * 1024 * 1024
