@@ -11,7 +11,8 @@ import (
 	"github.com/aystro/apod/internal/models"
 )
 
-// composeProjectName returns the docker compose project name for a site
+// composeProjectName returns the docker compose project name for a site.
+// Docker Compose uses this to namespace all resources (containers, networks, volumes).
 func composeProjectName(domain string) string {
 	return "apod-" + strings.ReplaceAll(domain, ".", "-")
 }
@@ -20,6 +21,43 @@ func composeProjectName(domain string) string {
 func (e *Engine) composeDir(owner, domain string) string {
 	_, dataRoot := e.SiteDir(owner, domain)
 	return filepath.Join(dataRoot, "compose")
+}
+
+// composeCmd builds an exec.Cmd for docker compose with the right project and file.
+func composeCmd(ctx context.Context, project, compDir string, args ...string) *exec.Cmd {
+	base := []string{"compose", "-p", project, "-f", filepath.Join(compDir, "docker-compose.yml")}
+	cmd := exec.CommandContext(ctx, "docker", append(base, args...)...)
+	cmd.Dir = compDir
+	return cmd
+}
+
+// sanitizeComposeFile makes a docker-compose.yml safe for multi-instance use:
+//   - Converts container_name: to hostname: (preserves internal hostname for apps that need it)
+//   - Docker Compose then uses <project>-<service>-<n> for the actual container name
+//   - Service-to-service DNS uses service names — unaffected by this change
+func sanitizeComposeFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "container_name:") {
+			// Convert to hostname: so the container's internal hostname stays the same
+			// (some apps like Supabase Realtime parse their own hostname)
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			name := strings.TrimSpace(strings.TrimPrefix(trimmed, "container_name:"))
+			name = strings.Trim(name, "\"'")
+			out = append(out, indent+"hostname: "+name)
+			continue
+		}
+		out = append(out, line)
+	}
+
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0644)
 }
 
 // CreateComposeSite creates a site using docker compose
@@ -37,16 +75,13 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		branch = "master"
 	}
 
-	cloneTarget := compDir
 	if comp.Path != "" {
-		// Clone to a temp location, then move the subdirectory
 		tmpDir := compDir + "-tmp"
 		os.RemoveAll(tmpDir)
 		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", "--depth", "1", comp.Repo, tmpDir)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
 		}
-		// Move the subdirectory to the compose dir
 		os.RemoveAll(compDir)
 		if err := os.Rename(filepath.Join(tmpDir, comp.Path), compDir); err != nil {
 			return fmt.Errorf("move compose subdir: %w", err)
@@ -54,20 +89,19 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		os.RemoveAll(tmpDir)
 	} else {
 		os.RemoveAll(compDir)
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", "--depth", "1", comp.Repo, cloneTarget)
+		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", "--depth", "1", comp.Repo, compDir)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
 		}
 	}
 
-	// Generate .env: start from .env.example if it exists, then override with driver vars
+	// Generate .env: start from .env.example as base, override with driver vars
 	envPath := filepath.Join(compDir, ".env")
 	envExamplePath := filepath.Join(compDir, ".env.example")
 
 	envMap := make(map[string]string)
-	envOrder := []string{}
+	var envOrder []string
 
-	// Read .env.example as base
 	if data, err := os.ReadFile(envExamplePath); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
@@ -76,14 +110,12 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 			}
 			if idx := strings.IndexByte(line, '='); idx > 0 {
 				key := line[:idx]
-				val := line[idx+1:]
-				envMap[key] = val
+				envMap[key] = line[idx+1:]
 				envOrder = append(envOrder, key)
 			}
 		}
 	}
 
-	// Override with driver-specified env vars
 	for envKey, varRef := range comp.Env {
 		value := expandVariables(varRef, vars)
 		if _, exists := envMap[envKey]; !exists {
@@ -92,7 +124,6 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		envMap[envKey] = value
 	}
 
-	// Write .env preserving order
 	var envContent strings.Builder
 	for _, key := range envOrder {
 		envContent.WriteString(key + "=" + envMap[key] + "\n")
@@ -113,68 +144,52 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		os.WriteFile(path, []byte(content), perm)
 	}
 
-	// Remove hardcoded container_name entries so Docker Compose uses <project>-<service>-1 naming.
-	// This allows multiple instances of the same compose stack on one server.
-	// Service-to-service communication uses service names via compose DNS (unaffected).
-	project := composeProjectName(opts.Domain)
+	// Sanitize compose file: convert container_name to hostname for multi-instance support
 	composeFile := filepath.Join(compDir, "docker-compose.yml")
-	if data, err := os.ReadFile(composeFile); err == nil {
-		lines := strings.Split(string(data), "\n")
-		var cleaned []string
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "container_name:") {
-				continue // remove hardcoded container names
-			}
-			cleaned = append(cleaned, line)
-		}
-		os.WriteFile(composeFile, []byte(strings.Join(cleaned, "\n")), 0644)
+	if err := sanitizeComposeFile(composeFile); err != nil {
+		return fmt.Errorf("sanitize compose file: %w", err)
 	}
 
 	// Start compose
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", composeFile, "up", "-d")
-	cmd.Dir = compDir
+	project := composeProjectName(opts.Domain)
+	cmd := composeCmd(ctx, project, compDir, "up", "-d")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose up: %s: %w", string(output), err)
 	}
 
-	// Connect Traefik to the compose network so it can route traffic
+	// Connect Traefik to the compose network
 	composeNetwork := project + "_default"
 	e.docker.ConnectNetwork(ctx, composeNetwork, "apod-traefik")
 
-	// Add Traefik routing config for the proxy service
+	// Write Traefik routing config using the compose service name on the compose network
 	if comp.ProxyService != "" && comp.ProxyPort != "" {
-		// Docker compose names containers as <project>-<service>-1
-		containerName := project + "-" + comp.ProxyService + "-1"
 		routerName := strings.ReplaceAll(opts.Domain, ".", "-")
-		labels := TraefikLabels(opts.Domain, []string{opts.Domain}, comp.ProxyPort, "")
 
-		// Apply labels by stopping, removing, and recreating with labels
-		// Actually, we can't add labels to running containers.
-		// Instead, use Traefik's file-based config or just add labels via docker compose labels
-		// For now, use the compose-native approach: modify docker-compose.yml to add Traefik labels
-
-		// Simpler: use Traefik file provider
+		// Traefik resolves the service name via the compose network DNS
 		traefikConfig := fmt.Sprintf(`[http.routers.%s]
-  rule = "Host(\x60%s\x60)"
+  rule = "Host(`+"`"+`%s`+"`"+`)"
   service = "%s"
   entrypoints = ["websecure"]
   [http.routers.%s.tls]
     certResolver = "letsencrypt"
 
+[http.routers.%s-http]
+  rule = "Host(`+"`"+`%s`+"`"+`)"
+  service = "%s"
+  entrypoints = ["web"]
+
 [http.services.%s.loadBalancer]
   [[http.services.%s.loadBalancer.servers]]
     url = "http://%s:%s"
-`, routerName, opts.Domain, routerName, routerName, routerName, routerName, containerName, comp.ProxyPort)
+`, routerName, opts.Domain, routerName, routerName,
+			routerName, opts.Domain, routerName,
+			routerName, routerName, comp.ProxyService, comp.ProxyPort)
 
 		traefikDir := "/etc/apod/traefik/dynamic"
 		os.MkdirAll(traefikDir, 0755)
-		configPath := filepath.Join(traefikDir, opts.Domain+".toml")
-		if err := os.WriteFile(configPath, []byte(traefikConfig), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(traefikDir, opts.Domain+".toml"), []byte(traefikConfig), 0644); err != nil {
 			return fmt.Errorf("write traefik config: %w", err)
 		}
-
-		_ = labels // not used with file provider
 	}
 
 	return nil
@@ -182,10 +197,8 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 
 // StopComposeSite stops a compose-based site
 func (e *Engine) StopComposeSite(ctx context.Context, domain, owner string) error {
-	compDir := e.composeDir(owner, domain)
 	project := composeProjectName(domain)
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", filepath.Join(compDir, "docker-compose.yml"), "stop")
-	cmd.Dir = compDir
+	cmd := composeCmd(ctx, project, e.composeDir(owner, domain), "stop")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose stop: %s: %w", string(output), err)
 	}
@@ -194,10 +207,8 @@ func (e *Engine) StopComposeSite(ctx context.Context, domain, owner string) erro
 
 // StartComposeSite starts a compose-based site
 func (e *Engine) StartComposeSite(ctx context.Context, domain, owner string) error {
-	compDir := e.composeDir(owner, domain)
 	project := composeProjectName(domain)
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", filepath.Join(compDir, "docker-compose.yml"), "start")
-	cmd.Dir = compDir
+	cmd := composeCmd(ctx, project, e.composeDir(owner, domain), "start")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose start: %s: %w", string(output), err)
 	}
@@ -206,30 +217,21 @@ func (e *Engine) StartComposeSite(ctx context.Context, domain, owner string) err
 
 // DestroyComposeSite destroys a compose-based site
 func (e *Engine) DestroyComposeSite(ctx context.Context, domain, owner string) error {
-	compDir := e.composeDir(owner, domain)
 	project := composeProjectName(domain)
-
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", filepath.Join(compDir, "docker-compose.yml"), "down", "-v", "--remove-orphans")
-	cmd.Dir = compDir
+	cmd := composeCmd(ctx, project, e.composeDir(owner, domain), "down", "-v", "--remove-orphans")
 	cmd.CombinedOutput() // best effort
 
-	// Remove Traefik config
+	// Remove Traefik routing config
 	os.Remove(filepath.Join("/etc/apod/traefik/dynamic", domain+".toml"))
-
 	return nil
 }
 
 // ExecInComposeSite runs a command in a compose service
-func (e *Engine) ExecInComposeSite(ctx context.Context, domain, owner, service string, cmd []string) (string, error) {
-	compDir := e.composeDir(owner, domain)
+func (e *Engine) ExecInComposeSite(ctx context.Context, domain, owner, service string, cmdArgs []string) (string, error) {
 	project := composeProjectName(domain)
-
-	args := []string{"compose", "-p", project, "-f", filepath.Join(compDir, "docker-compose.yml"), "exec", "-T", service}
-	args = append(args, cmd...)
-
-	command := exec.CommandContext(ctx, "docker", args...)
-	command.Dir = compDir
-	output, err := command.CombinedOutput()
+	args := append([]string{"exec", "-T", service}, cmdArgs...)
+	cmd := composeCmd(ctx, project, e.composeDir(owner, domain), args...)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("compose exec: %s: %w", string(output), err)
 	}
