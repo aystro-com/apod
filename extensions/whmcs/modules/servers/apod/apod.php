@@ -30,15 +30,29 @@ if (!defined("WHMCS")) {
  */
 function apod_getDomain(array $params): string
 {
-    // Check custom fields first
+    // Check WHMCS domain field first (set by CreateAccount on first provision)
+    if (!empty($params['domain'])) {
+        return $params['domain'];
+    }
+
+    // Check custom fields passed by WHMCS
     $customfields = $params['customfields'] ?? [];
     if (!empty($customfields['Domain'])) {
         return $customfields['Domain'];
     }
 
-    // Fall back to WHMCS domain field
-    if (!empty($params['domain'])) {
-        return $params['domain'];
+    // Last resort: look up custom field directly from DB
+    if (!empty($params['serviceid'])) {
+        try {
+            $val = \WHMCS\Database\Capsule::table('tblcustomfieldsvalues')
+                ->join('tblcustomfields', 'tblcustomfields.id', '=', 'tblcustomfieldsvalues.fieldid')
+                ->where('tblcustomfields.fieldname', 'Domain')
+                ->where('tblcustomfieldsvalues.relid', $params['serviceid'])
+                ->value('tblcustomfieldsvalues.value');
+            if (!empty($val)) {
+                return $val;
+            }
+        } catch (\Exception $e) {}
     }
 
     return '';
@@ -203,10 +217,76 @@ function apod_ClientArea(array $params)
     $html .= '<div class="col-sm-3"><strong>Driver:</strong> ' . htmlspecialchars($params['configoption1'] ?? 'php') . '</div>';
     $html .= '</div>';
 
-    // Container shell access (web terminal)
-    if ($shellEnabled) {
+    // Container shell access (web terminal embedded in WHMCS)
+    if ($shellEnabled && $status === 'running') {
+        // Get a terminal token from apod
+        $tokenResp = apod_request($params, '/sites/' . $domain . '/terminal', 'POST');
+        $termToken = $tokenResp['data']['token'] ?? '';
+
+        if ($termToken) {
+            $execUrl = '/modules/servers/apod/terminal_proxy.php';
+            $serviceId = $params['serviceid'] ?? 0;
+
+            $html .= '<hr><h4>Container Shell</h4>';
+            $html .= '<p class="text-muted">Commands run inside your isolated container. Token expires in 5 minutes — refresh for a new one.</p>';
+            $html .= '<div style="background:#1e1e1e;border-radius:6px;padding:15px;font-family:monospace;color:#0f0;max-height:400px;overflow-y:auto" id="apod-terminal-output">';
+            $html .= '<div>Welcome to ' . htmlspecialchars($domain) . '</div>';
+            $html .= '<div>Type a command and press Enter.</div><div>&nbsp;</div>';
+            $html .= '</div>';
+            $html .= '<div style="margin-top:8px;display:flex;gap:8px">';
+            $html .= '<span style="font-family:monospace;color:#666;line-height:34px">$</span>';
+            $html .= '<input type="text" id="apod-terminal-input" class="form-control" placeholder="ls -la" style="font-family:monospace;flex:1" autocomplete="off">';
+            $html .= '<button class="btn btn-success" id="apod-terminal-run">Run</button>';
+            $html .= '</div>';
+            $html .= '<script>
+(function() {
+    var token = "' . $termToken . '";
+    var execUrl = "' . $execUrl . '";
+    var serviceId = ' . intval($serviceId) . ';
+    var output = document.getElementById("apod-terminal-output");
+    var input = document.getElementById("apod-terminal-input");
+    var btn = document.getElementById("apod-terminal-run");
+
+    function run() {
+        var cmd = input.value.trim();
+        if (!cmd) return;
+        output.innerHTML += "<div style=\"color:#fff\">$ " + cmd.replace(/</g,"&lt;") + "</div>";
+        input.value = "";
+        btn.disabled = true;
+        btn.textContent = "...";
+
+        fetch(execUrl, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({token: token, command: cmd, service_id: serviceId})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok && data.data && data.data.output) {
+                output.innerHTML += "<pre style=\"color:#ccc;margin:0;white-space:pre-wrap\">" + data.data.output.replace(/</g,"&lt;") + "</pre>";
+            } else {
+                output.innerHTML += "<div style=\"color:#f55\">" + (data.error || "Error") + "</div>";
+            }
+            output.scrollTop = output.scrollHeight;
+            btn.disabled = false;
+            btn.textContent = "Run";
+        })
+        .catch(function(e) {
+            output.innerHTML += "<div style=\"color:#f55\">Connection error</div>";
+            btn.disabled = false;
+            btn.textContent = "Run";
+        });
+    }
+
+    btn.addEventListener("click", run);
+    input.addEventListener("keydown", function(e) { if (e.key === "Enter") run(); });
+    input.focus();
+})();
+</script>';
+        }
+    } else if ($shellEnabled) {
         $html .= '<hr><h4>Container Shell</h4>';
-        $html .= '<p>Access your site\'s container directly via web terminal. All commands run inside your isolated container — fully sandboxed from other sites.</p>';
+        $html .= '<p class="text-muted">Terminal is available when the site is running.</p>';
     }
 
     // Backups
@@ -253,11 +333,6 @@ function apod_ClientAreaCustomButtonArray(array $params = [])
         'Restart Site' => 'restart',
     ];
 
-    // Shell access
-    if (!empty($params['configoption5'])) {
-        $buttons['Open Terminal'] = 'openTerminal';
-    }
-
     // Backups
     if (!empty($params['configoption6'])) {
         $buttons['Create Backup'] = 'createBackup';
@@ -269,24 +344,67 @@ function apod_ClientAreaCustomButtonArray(array $params = [])
 
 function apod_openTerminal(array $params)
 {
-    $domain = apod_getDomain($params);
-    if (empty($domain)) {
-        return 'Domain is required';
-    }
-    if (empty($params['configoption5'])) {
-        return 'Shell access is not enabled for this product';
+    return 'Use the terminal in the service details page';
+}
+
+/**
+ * AJAX proxy for terminal exec — called by the embedded terminal JS
+ * This avoids CORS issues since the request goes WHMCS → apod, not browser → apod
+ */
+function apod_terminalProxy()
+{
+    if (!defined("WHMCS")) return;
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    $token = $input['token'] ?? '';
+    $command = $input['command'] ?? '';
+    $serviceId = $input['service_id'] ?? 0;
+
+    if (empty($token) || empty($command) || empty($serviceId)) {
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => false, 'error' => 'Missing parameters']);
+        return;
     }
 
-    // Execute a command in the container via the API
-    // For web terminal, this would redirect to a websocket terminal
-    // For now, return a URL that the admin/customer can use
-    $serverHost = $params['serverhostname'] ?: $params['serverip'];
-    $port = $params['serverport'] ?: '8443';
-    $scheme = $params['serversecure'] ? 'https' : 'http';
+    // Verify the user owns this service
+    $service = \WHMCS\Database\Capsule::table('tblhosting')
+        ->where('id', $serviceId)
+        ->first();
 
-    // The actual web terminal would be served by apod at this URL
-    header('Location: ' . $scheme . '://' . $serverHost . ':' . $port . '/terminal/' . $domain);
-    exit;
+    if (!$service) {
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => false, 'error' => 'Service not found']);
+        return;
+    }
+
+    // Get server details
+    $server = \WHMCS\Database\Capsule::table('tblservers')
+        ->where('type', 'apod')
+        ->first();
+
+    if (!$server) {
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => false, 'error' => 'Server not configured']);
+        return;
+    }
+
+    $host = $server->hostname ?: $server->ipaddress;
+    $port = $server->port ?: '8443';
+    $url = 'http://' . $host . ':' . $port . '/api/v1/terminal/exec';
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['token' => $token, 'command' => $command]));
+    $result = curl_exec($ch);
+    curl_close($ch);
+
+    header('Content-Type: application/json');
+    echo $result ?: json_encode(['ok' => false, 'error' => 'Connection failed']);
 }
 
 function apod_restart(array $params)
@@ -435,7 +553,13 @@ function apod_request(array $params, string $endpoint, string $method = 'GET', a
     $host = rtrim($params['serverhostname'] ?: $params['serverip'], '/');
     $port = $params['serverport'] ?: '8443';
     $scheme = $params['serversecure'] ? 'https' : 'http';
-    $apiKey = $params['serverpassword'];
+    $apiKey = $params['serverpassword'] ?? '';
+    // WHMCS may encrypt the password — try to decrypt
+    if (!empty($apiKey) && !str_starts_with($apiKey, 'apod_')) {
+        try {
+            $apiKey = decrypt($apiKey);
+        } catch (\Exception $e) {}
+    }
 
     $url = $scheme . '://' . $host . ':' . $port . '/api/v1' . $endpoint;
 
