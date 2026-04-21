@@ -185,29 +185,30 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	dbName := strings.ReplaceAll(opts.Domain, ".", "_")
 	dbUser := dbName
 
-	// Generate additional secrets for complex drivers (Supabase etc.)
-	jwtSecret := randomBase64(30)
-	anonKey := generateSupabaseJWT(jwtSecret, "anon")
-	serviceRoleKey := generateSupabaseJWT(jwtSecret, "service_role")
-
 	vars := map[string]string{
-		"site_root":              siteRoot,
-		"data_root":             dataRoot,
-		"site_domain":           opts.Domain,
-		"site_db_name":          dbName,
-		"site_db_user":          dbUser,
-		"site_db_pass":          dbPass,
-		"jwt_secret":            jwtSecret,
-		"anon_key":              anonKey,
-		"service_role_key":      serviceRoleKey,
-		"secret_key_base":       randomBase64(48),
-		"vault_enc_key":         randomHex(16),
-		"dashboard_password":    randomHex(16),
-		"pg_meta_crypto_key":    randomBase64(24),
-		"s3_access_key_id":      randomHex(16),
-		"s3_access_key_secret":  randomHex(32),
-		"logflare_public_token": randomBase64(24),
-		"logflare_private_token": randomBase64(24),
+		"site_root":    siteRoot,
+		"data_root":    dataRoot,
+		"site_domain":  opts.Domain,
+		"site_db_name": dbName,
+		"site_db_user": dbUser,
+		"site_db_pass": dbPass,
+	}
+
+	// Generate extra secrets only if the driver references them.
+	// This keeps the core engine generic — drivers declare what they need.
+	// Order matters: jwt_secret must exist before anon_key/service_role_key.
+	driverText := driverRawText(driver)
+	genOrder := []string{
+		"jwt_secret", "anon_key", "service_role_key",
+		"secret_key_base", "vault_enc_key", "dashboard_password",
+		"pg_meta_crypto_key", "s3_access_key_id", "s3_access_key_secret",
+		"logflare_public_token", "logflare_private_token",
+	}
+	generators := secretGenerators()
+	for _, varName := range genOrder {
+		if strings.Contains(driverText, "${"+varName+"}") {
+			vars[varName] = generators[varName](vars)
+		}
 	}
 	// Add driver parameter defaults to vars
 	for key, param := range driver.Parameters {
@@ -551,4 +552,53 @@ func randomHex(n int) string {
 
 func base64Encode(b []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
+}
+
+// secretGenerators returns a map of variable names to generator functions.
+// A generator receives the current vars map and returns the generated value.
+// These are only called if the driver YAML actually references ${var_name}.
+func secretGenerators() map[string]func(vars map[string]string) string {
+	return map[string]func(vars map[string]string) string{
+		"jwt_secret":            func(v map[string]string) string { return randomBase64(30) },
+		"anon_key":              func(v map[string]string) string { return generateJWT(v["jwt_secret"], "anon") },
+		"service_role_key":      func(v map[string]string) string { return generateJWT(v["jwt_secret"], "service_role") },
+		"secret_key_base":       func(v map[string]string) string { return randomBase64(48) },
+		"vault_enc_key":         func(v map[string]string) string { return randomHex(16) },
+		"dashboard_password":    func(v map[string]string) string { return randomHex(16) },
+		"pg_meta_crypto_key":    func(v map[string]string) string { return randomBase64(24) },
+		"s3_access_key_id":      func(v map[string]string) string { return randomHex(16) },
+		"s3_access_key_secret":  func(v map[string]string) string { return randomHex(32) },
+		"logflare_public_token": func(v map[string]string) string { return randomBase64(24) },
+		"logflare_private_token": func(v map[string]string) string { return randomBase64(24) },
+	}
+}
+
+// driverRawText returns a string representation of the driver for variable detection.
+func driverRawText(driver *models.Driver) string {
+	var b strings.Builder
+	for _, svc := range driver.Services {
+		b.WriteString(svc.Image)
+		b.WriteString(svc.Command)
+		for _, v := range svc.Volumes {
+			b.WriteString(v)
+		}
+		for k, v := range svc.Environment {
+			b.WriteString(k)
+			b.WriteString(v)
+		}
+	}
+	for _, f := range driver.Files {
+		b.WriteString(f.Path)
+		b.WriteString(f.Content)
+	}
+	for _, s := range driver.Setup {
+		b.WriteString(s.Command)
+	}
+	if driver.Compose != nil {
+		for k, v := range driver.Compose.Env {
+			b.WriteString(k)
+			b.WriteString(v)
+		}
+	}
+	return b.String()
 }

@@ -31,13 +31,14 @@ func dbDumpCommand(dbType, dbName, dbUser, dbPass string) []string {
 }
 
 // composeDumpCommand returns a dump command for compose-managed databases.
-// Uses default/superuser credentials since compose handles auth via env vars.
+// Uses environment variables for credentials since compose handles auth via .env.
 func composeDumpCommand(dbType string) []string {
 	switch dbType {
 	case "mysql":
 		return []string{"sh", "-c", "mysqldump --all-databases -u root -p\"$MYSQL_ROOT_PASSWORD\""}
 	case "postgres":
-		return []string{"pg_dumpall", "-U", "supabase_admin"}
+		// Use POSTGRES_USER env var (set by compose .env), fallback to postgres
+		return []string{"sh", "-c", "pg_dumpall -U \"${POSTGRES_USER:-postgres}\""}
 	case "mongo":
 		return []string{"mongodump", "--archive"}
 	default:

@@ -10,13 +10,14 @@ import (
 	"time"
 )
 
-// generateSupabaseJWT creates an HS256-signed JWT compatible with Supabase.
-func generateSupabaseJWT(secret, role string) string {
+// generateJWT creates an HS256-signed JWT with the given role claim.
+// Used by drivers that need pre-signed tokens (e.g., Supabase anon/service_role keys).
+func generateJWT(secret, role string) string {
 	header := map[string]string{"alg": "HS256", "typ": "JWT"}
 	now := time.Now().Unix()
 	payload := map[string]interface{}{
 		"role": role,
-		"iss":  "supabase",
+		"iss":  "apod",
 		"iat":  now,
 		"exp":  now + 5*365*24*3600, // 5 years
 	}
@@ -48,4 +49,3 @@ func randomBase64(n int) string {
 	rand.Read(b)
 	return base64.StdEncoding.EncodeToString(b)
 }
-
