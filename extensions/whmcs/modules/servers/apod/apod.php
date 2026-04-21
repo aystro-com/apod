@@ -298,15 +298,20 @@ function apod_ClientArea(array $params)
 
         if (is_array($backups) && count($backups) > 0) {
             $html .= '<table class="table table-condensed table-striped">';
-            $html .= '<thead><tr><th>ID</th><th>Storage</th><th>Size</th><th>Date</th><th></th></tr></thead><tbody>';
+            $sid = $params['serviceid'] ?? '';
+            $html .= '<thead><tr><th>ID</th><th>Storage</th><th>Size</th><th>Date</th><th>Actions</th></tr></thead><tbody>';
             foreach ($backups as $b) {
+                $bid = $b['id'] ?? '';
                 $size = isset($b['size_bytes']) ? round($b['size_bytes'] / 1024 / 1024, 1) . ' MB' : '-';
                 $html .= '<tr>';
-                $html .= '<td>' . ($b['id'] ?? '-') . '</td>';
+                $html .= '<td>' . $bid . '</td>';
                 $html .= '<td>' . ($b['storage_name'] ?? 'local') . '</td>';
                 $html .= '<td>' . $size . '</td>';
                 $html .= '<td>' . ($b['created_at'] ?? '-') . '</td>';
-                $html .= '<td><a href="clientarea.php?action=productdetails&id=' . ($params['serviceid'] ?? '') . '&modop=custom&a=downloadBackup&backup_id=' . ($b['id'] ?? '') . '" class="btn btn-xs btn-default">Download</a></td>';
+                $html .= '<td>';
+                $html .= '<a href="clientarea.php?action=productdetails&id=' . $sid . '&modop=custom&a=downloadBackup&backup_id=' . $bid . '" class="btn btn-xs btn-default">Download</a> ';
+                $html .= '<a href="#" onclick="if(confirm(\'Are you sure you want to restore this backup? This will overwrite your current site data.\')){window.location=\'clientarea.php?action=productdetails&id=' . $sid . '&modop=custom&a=restoreBackupById&backup_id=' . $bid . '\';}return false;" class="btn btn-xs btn-warning">Restore</a>';
+                $html .= '</td>';
                 $html .= '</tr>';
             }
             $html .= '</tbody></table>';
@@ -337,8 +342,6 @@ function apod_ClientAreaCustomButtonArray(array $params = [])
     // Backups
     if (!empty($params['configoption6'])) {
         $buttons['Create Backup'] = 'createBackup';
-        $buttons['Restore Latest Backup'] = 'restoreBackup';
-        $buttons['Download Backup'] = 'downloadBackup';
     }
 
     return $buttons;
@@ -470,6 +473,31 @@ function apod_restoreBackup(array $params)
 
     $response = apod_request($params, '/sites/' . $domain . '/backups/restore', 'POST', [
         'backup_id' => $latestId,
+    ]);
+    if ($response['error']) {
+        return $response['error'];
+    }
+
+    return 'success';
+}
+
+function apod_restoreBackupById(array $params)
+{
+    $domain = apod_getDomain($params);
+    if (empty($domain)) {
+        return 'Domain is required';
+    }
+    if (empty($params['configoption6'])) {
+        return 'Backups are not enabled for this product';
+    }
+
+    $backupId = intval($_GET['backup_id'] ?? 0);
+    if ($backupId < 1) {
+        return 'Invalid backup ID';
+    }
+
+    $response = apod_request($params, '/sites/' . $domain . '/backups/restore', 'POST', [
+        'backup_id' => $backupId,
     ]);
     if ($response['error']) {
         return $response['error'];
