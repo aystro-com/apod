@@ -9,6 +9,7 @@ compose:
   path: "docker"
   proxy_service: "kong"
   proxy_port: "8000"
+  shell_service: "db"
   env:
     # Core
     SITE_URL: "https://${site_domain}"

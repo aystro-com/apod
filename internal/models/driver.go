@@ -65,6 +65,7 @@ type DriverCompose struct {
 	Path         string            `yaml:"path,omitempty"`          // Subdirectory in repo (e.g., "docker")
 	ProxyService string            `yaml:"proxy_service"`           // Service name Traefik routes to
 	ProxyPort    string            `yaml:"proxy_port"`              // Port on that service
+	ShellService string            `yaml:"shell_service,omitempty"` // Service for apod access / terminal
 	Env          map[string]string `yaml:"env,omitempty"`           // Map driver vars to compose .env
 }
 

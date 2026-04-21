@@ -102,14 +102,43 @@ func cleanExpiredTokens() {
 	}
 }
 
-// ExecInSite runs a command inside a site's app container
+// ExecInSite runs a command inside a site's app/shell container.
+// For normal sites: uses apod-<domain>-app container.
+// For compose sites: finds the container with apod.shell=true label, or falls back to first labeled container.
 func (e *Engine) ExecInSite(ctx context.Context, domain, command string) (string, error) {
+	// Try normal container first
 	containerName := fmt.Sprintf("apod-%s-app", domain)
+	if exists, _ := e.docker.ContainerExists(ctx, containerName); !exists {
+		// Compose site: find shell container by label
+		shellIDs, _ := e.docker.ListContainersByLabel(ctx, "apod.shell", "true")
+		found := false
+		for _, id := range shellIDs {
+			// Verify it belongs to this site
+			siteIDs, _ := e.docker.ListContainersByLabel(ctx, "apod.site", domain)
+			for _, siteID := range siteIDs {
+				if id == siteID {
+					containerName = id
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			// Fallback: first container for this site
+			ids, _ := e.docker.ListContainersByLabel(ctx, "apod.site", domain)
+			if len(ids) > 0 {
+				containerName = ids[0]
+			}
+		}
+	}
+
 	output, err := e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", command})
 	if err != nil {
 		return "", fmt.Errorf("exec: %w", err)
 	}
-	// Cap output at 64KB to prevent abuse
 	if len(output) > 65536 {
 		output = output[:65536] + "\n... (output truncated)"
 	}
