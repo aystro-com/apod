@@ -17,6 +17,7 @@ Hosting panels are bloated. PaaS platforms are expensive. Kubernetes is overkill
 - **Resource limits** — CPU, RAM, disk quotas, PID limits — all kernel-enforced
 - **Network isolation** — each site gets its own Docker network, can't reach other sites
 - **Billing integration** — WHMCS and Paymenter modules for automated provisioning
+- **Migration** — export/import sites between servers with a single command
 - **SaaS-ify anything** — turn any Docker app into a managed service in minutes
 - **Web terminal** — secure token-based container shell access via billing panel
 
@@ -337,7 +338,33 @@ apod list                                # List all sites
 apod status <domain>                     # Detailed site info + resource usage
 apod access <domain> [--shell bash]      # Interactive shell into container
 apod clone <source> <target>             # Full site copy
+apod export <domain> [-o /path/]         # Export site to zip for migration
+apod import <file.zip> [--domain new]    # Import site from export zip
 ```
+
+### Migration (VPS to VPS)
+
+Move a site between servers with a single export/import:
+
+```bash
+# On source server
+apod export mysite.com -o /tmp/
+# → /tmp/mysite.com_export_20260421_120000.zip
+
+# Transfer to target server
+scp /tmp/mysite.com_export_*.zip root@new-server:/tmp/
+
+# On target server
+apod import /tmp/mysite.com_export_*.zip
+
+# Or import with a different domain
+apod import /tmp/mysite.com_export_*.zip --domain newdomain.com
+
+# Or assign to a user
+apod import /tmp/mysite.com_export_*.zip --owner client1
+```
+
+The export includes everything: site files, volume data, gzip-compressed database dumps, env vars, domain aliases, and resource config metadata.
 
 ### Domains
 
@@ -664,6 +691,8 @@ Error responses:
 | `POST` | `/api/v1/sites/{domain}/restart` | Restart site | |
 | `DELETE` | `/api/v1/sites/{domain}` | Destroy site | `?purge=true` to remove data |
 | `POST` | `/api/v1/sites/{domain}/clone` | Clone site | `{"target": "new.domain.com"}` |
+| `POST` | `/api/v1/sites/{domain}/export` | Export site to zip | `{"output_dir": "/tmp"}` |
+| `POST` | `/api/v1/import` | Import site from zip | `{"path": "/tmp/export.zip", "domain": "", "owner": ""}` |
 
 ### Domains
 

@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 
@@ -622,6 +624,80 @@ func (h *Handler) CloneSiteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "cloned", "target": req.Target})
+}
+
+func (h *Handler) ExportSiteHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	var req struct {
+		OutputDir string `json:"output_dir"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	path, err := h.engine.ExportSite(r.Context(), domain, req.OutputDir)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	info, _ := os.Stat(path)
+	size := int64(0)
+	if info != nil {
+		size = info.Size()
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"path": path, "size": size})
+}
+
+func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
+	contentType := r.Header.Get("Content-Type")
+
+	if contentType == "application/zip" {
+		// Remote upload — save to temp file then import
+		tmpFile, err := os.CreateTemp("", "apod-import-*.zip")
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to create temp file")
+			return
+		}
+		defer os.Remove(tmpFile.Name())
+		defer tmpFile.Close()
+
+		if _, err := io.Copy(tmpFile, r.Body); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to read upload")
+			return
+		}
+		tmpFile.Close()
+
+		domain := r.URL.Query().Get("domain")
+		owner := r.URL.Query().Get("owner")
+
+		if err := h.engine.ImportSite(r.Context(), tmpFile.Name(), domain, owner); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusCreated, map[string]string{"status": "imported"})
+		return
+	}
+
+	// Local import — path on disk
+	var req struct {
+		Path   string `json:"path"`
+		Domain string `json:"domain"`
+		Owner  string `json:"owner"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Path == "" {
+		respondError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+
+	if err := h.engine.ImportSite(r.Context(), req.Path, req.Domain, req.Owner); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]string{"status": "imported"})
 }
 
 func (h *Handler) DBExportHandler(w http.ResponseWriter, r *http.Request) {

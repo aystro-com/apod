@@ -106,6 +106,10 @@ func New(e *engine.Engine) *Server {
 		// Clone
 		r.Post("/sites/{domain}/clone", h.CloneSiteHandler)
 
+		// Export / Import (migration)
+		r.Post("/sites/{domain}/export", h.ExportSiteHandler)
+		r.Post("/import", h.ImportSiteHandler)
+
 		// Database
 		r.Get("/sites/{domain}/db/export", h.DBExportHandler)
 		r.Post("/sites/{domain}/db/import", h.DBImportHandler)
