@@ -29,29 +29,44 @@ func (e *Engine) GetSiteStats(ctx context.Context, domain string) (*SiteStats, e
 		Status: site.Status,
 	}
 
-	containerName := fmt.Sprintf("apod-%s-app", domain)
-	resp, err := e.docker.cli.ContainerStats(ctx, containerName, false)
-	if err != nil {
-		return stats, nil // return what we have
-	}
-	defer resp.Body.Close()
-
-	var dockerStats container.StatsResponse
-	data, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(data, &dockerStats); err != nil {
-		return stats, nil
+	// Collect stats from all containers belonging to this site.
+	// Works for both normal sites (apod-<domain>-app) and compose sites (labeled containers).
+	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
+	if len(ids) == 0 {
+		// Fallback: try the old-style container name
+		containerName := fmt.Sprintf("apod-%s-app", domain)
+		if exists, _ := e.docker.ContainerExists(ctx, containerName); exists {
+			ids = []string{containerName}
+		}
 	}
 
-	// Calculate CPU %
-	cpuDelta := float64(dockerStats.CPUStats.CPUUsage.TotalUsage - dockerStats.PreCPUStats.CPUUsage.TotalUsage)
-	systemDelta := float64(dockerStats.CPUStats.SystemUsage - dockerStats.PreCPUStats.SystemUsage)
-	if systemDelta > 0 {
-		stats.CPUPercent = (cpuDelta / systemDelta) * float64(len(dockerStats.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+	memoryLimit := parseMemoryMB(site.RAM)
+
+	for _, id := range ids {
+		resp, err := e.docker.cli.ContainerStats(ctx, id, false)
+		if err != nil {
+			continue
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var dockerStats container.StatsResponse
+		if err := json.Unmarshal(data, &dockerStats); err != nil {
+			continue
+		}
+
+		// Aggregate CPU
+		cpuDelta := float64(dockerStats.CPUStats.CPUUsage.TotalUsage - dockerStats.PreCPUStats.CPUUsage.TotalUsage)
+		systemDelta := float64(dockerStats.CPUStats.SystemUsage - dockerStats.PreCPUStats.SystemUsage)
+		if systemDelta > 0 {
+			stats.CPUPercent += (cpuDelta / systemDelta) * float64(len(dockerStats.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+		}
+
+		// Aggregate memory
+		stats.MemoryMB += float64(dockerStats.MemoryStats.Usage) / 1024 / 1024
 	}
 
-	// Memory
-	stats.MemoryMB = float64(dockerStats.MemoryStats.Usage) / 1024 / 1024
-	stats.MemoryLimit = float64(dockerStats.MemoryStats.Limit) / 1024 / 1024
+	stats.MemoryLimit = float64(memoryLimit)
 	if stats.MemoryLimit > 0 {
 		stats.MemoryPercent = stats.MemoryMB / stats.MemoryLimit * 100
 	}

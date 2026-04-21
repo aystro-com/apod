@@ -24,6 +24,11 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		return fmt.Errorf("get source site: %w", err)
 	}
 
+	driver, err := e.drivers.Load(source.Driver)
+	if err != nil {
+		return fmt.Errorf("load driver: %w", err)
+	}
+
 	// Create target site with same config
 	err = e.CreateSite(ctx, CreateSiteOpts{
 		Domain: targetDomain,
@@ -37,14 +42,13 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		return fmt.Errorf("create target site: %w", err)
 	}
 
-	// Copy files
-	sourceRoot := filepath.Join(e.dataDir, "sites", sourceDomain, "files")
-	targetRoot := filepath.Join(e.dataDir, "sites", targetDomain, "files")
+	// Copy site files
+	sourceRoot, sourceData := e.SiteDir(source.Owner, sourceDomain)
+	target, _ := e.db.GetSite(targetDomain)
+	targetRoot, targetData := e.SiteDir(target.Owner, targetDomain)
 
-	err = copyDir(sourceRoot, targetRoot)
-	if err != nil {
-		return fmt.Errorf("copy files: %w", err)
-	}
+	copyDir(sourceRoot, targetRoot)
+	copyDir(sourceData, targetData)
 
 	// Copy env vars
 	envs, _ := parseEnvJSON(source.Env)
@@ -54,29 +58,49 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 	}
 
 	// Dump and import database
-	driver, err := e.drivers.Load(source.Driver)
-	if err == nil {
-		dbName := strings.ReplaceAll(sourceDomain, ".", "_")
-		dbUser := dbName
-		targetDbName := strings.ReplaceAll(targetDomain, ".", "_")
+	isCompose := driver.Type == "compose"
+	dbName := strings.ReplaceAll(sourceDomain, ".", "_")
+	dbUser := dbName
+	targetDbName := strings.ReplaceAll(targetDomain, ".", "_")
 
-		for _, dbCfg := range driver.Backup.Databases {
+	for _, dbCfg := range driver.Backup.Databases {
+		// Dump from source
+		var dumpCmd []string
+		if isCompose {
+			dumpCmd = composeDumpCommand(dbCfg.Type)
+		} else {
+			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
+		}
+		if dumpCmd == nil {
+			continue
+		}
+
+		var output string
+		if isCompose {
+			output, err = e.ExecInComposeSite(ctx, sourceDomain, source.Owner, dbCfg.Service, dumpCmd)
+		} else {
 			sourceContainer := fmt.Sprintf("apod-%s-%s", sourceDomain, dbCfg.Service)
-			targetContainer := fmt.Sprintf("apod-%s-%s", targetDomain, dbCfg.Service)
+			output, err = e.docker.ExecInContainer(ctx, sourceContainer, dumpCmd)
+		}
+		if err != nil {
+			continue
+		}
 
-			// Dump from source
-			dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
-			if dumpCmd == nil {
-				continue
+		// Import to target
+		b64Dump := base64Encode([]byte(output))
+		var restoreShell string
+		if isCompose {
+			// Compose: use default user
+			switch dbCfg.Type {
+			case "mysql":
+				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql -u root -p\"$MYSQL_ROOT_PASSWORD\" < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
+			case "postgres":
+				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U \"${POSTGRES_USER:-postgres}\" -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
 			}
-			output, err := e.docker.ExecInContainer(ctx, sourceContainer, dumpCmd)
-			if err != nil {
-				continue // non-fatal, site might not have a populated DB
+			if restoreShell != "" {
+				e.ExecInComposeSite(ctx, targetDomain, target.Owner, dbCfg.Service, []string{"sh", "-c", restoreShell})
 			}
-
-			// Import to target via base64 to avoid shell injection
-			b64Dump := base64Encode([]byte(output))
-			var restoreShell string
+		} else {
 			switch dbCfg.Type {
 			case "mysql":
 				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql -u%s -pbackup %s < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
@@ -84,6 +108,7 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U %s -d %s -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
 			}
 			if restoreShell != "" {
+				targetContainer := fmt.Sprintf("apod-%s-%s", targetDomain, dbCfg.Service)
 				e.docker.ExecInContainer(ctx, targetContainer, []string{"sh", "-c", restoreShell})
 			}
 		}

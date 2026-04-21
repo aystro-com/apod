@@ -48,6 +48,21 @@ func (cm *CronManager) LoadJobs() error {
 
 		cm.cron.AddFunc(job.Schedule, func() {
 			ctx := context.Background()
+
+			// Check if this is a compose site
+			site, _ := cm.engine.db.GetSite(domain)
+			if site != nil {
+				driver, _ := cm.engine.drivers.Load(site.Driver)
+				if driver != nil && driver.Type == "compose" {
+					_, err := cm.engine.ExecInComposeSite(ctx, domain, site.Owner, service, []string{"sh", "-c", command})
+					if err != nil {
+						log.Printf("cron job failed [%s] %s: %v", domain, command, err)
+					}
+					return
+				}
+			}
+
+			// Normal site
 			containerName := fmt.Sprintf("apod-%s-%s", domain, service)
 			_, err := cm.engine.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", command})
 			if err != nil {
