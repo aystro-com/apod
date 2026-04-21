@@ -60,13 +60,14 @@ func dbRestoreCommand(dbType, dbName, dbUser, dbPass, dumpFile string) []string 
 }
 
 type backupMetadata struct {
-	Domain    string            `json:"domain"`
-	Driver    string            `json:"driver"`
-	RAM       string            `json:"ram"`
-	CPU       string            `json:"cpu"`
-	Env       map[string]string `json:"env"`
-	Domains   []string          `json:"domains"`
-	CreatedAt string            `json:"created_at"`
+	Domain     string            `json:"domain"`
+	Driver     string            `json:"driver"`
+	DriverType string            `json:"driver_type,omitempty"`
+	RAM        string            `json:"ram"`
+	CPU        string            `json:"cpu"`
+	Env        map[string]string `json:"env"`
+	Domains    []string          `json:"domains"`
+	CreatedAt  string            `json:"created_at"`
 }
 
 // backupDir returns the local backup directory for a site based on ownership.
@@ -209,17 +210,29 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	domains, _ := e.db.ListDomains(site.ID)
 
 	meta := backupMetadata{
-		Domain:    site.Domain,
-		Driver:    site.Driver,
-		RAM:       site.RAM,
-		CPU:       site.CPU,
-		Env:       envs,
-		Domains:   domains,
-		CreatedAt: time.Now().Format(time.RFC3339),
+		Domain:     site.Domain,
+		Driver:     site.Driver,
+		DriverType: driver.Type,
+		RAM:        site.RAM,
+		CPU:        site.CPU,
+		Env:        envs,
+		Domains:    domains,
+		CreatedAt:  time.Now().Format(time.RFC3339),
 	}
 	metaJSON, _ := json.MarshalIndent(meta, "", "  ")
 	w, _ := zw.Create("metadata.json")
 	w.Write(metaJSON)
+
+	// For compose sites: include the .env file with all secrets (JWT keys, passwords, etc.)
+	// This is critical for restore/migration — without it, the site can't reconnect to its data.
+	if isCompose {
+		compDir := e.composeDir(site.Owner, domain)
+		envFile := filepath.Join(compDir, ".env")
+		if data, err := os.ReadFile(envFile); err == nil {
+			w, _ := zw.Create("compose_env")
+			w.Write(data)
+		}
+	}
 
 	zw.Close()
 
@@ -352,11 +365,26 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			envJSON, _ := envToJSON(meta.Env)
 			e.db.UpdateSiteConfig(domain, map[string]string{"env": envJSON})
 		}
+		// Restore compose .env (secrets, JWT keys, passwords)
+		if f.Name == "compose_env" {
+			compDir := e.composeDir(site.Owner, domain)
+			envPath := filepath.Join(compDir, ".env")
+			rc, _ := f.Open()
+			data, _ := io.ReadAll(rc)
+			rc.Close()
+			os.MkdirAll(compDir, 0755)
+			os.WriteFile(envPath, data, 0600)
+		}
 	}
 
-	// Restart
-	for _, id := range ids {
-		e.docker.StartContainer(ctx, id)
+	// Restart — use compose for compose sites, docker for normal
+	driver, _ := e.drivers.Load(site.Driver)
+	if driver != nil && driver.Type == "compose" {
+		e.StartComposeSite(ctx, domain, site.Owner)
+	} else {
+		for _, id := range ids {
+			e.docker.StartContainer(ctx, id)
+		}
 	}
 	e.db.UpdateSiteStatus(domain, "running")
 	return nil

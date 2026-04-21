@@ -90,17 +90,27 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir string) (stri
 	domains, _ := e.db.ListDomains(site.ID)
 
 	meta := backupMetadata{
-		Domain:    site.Domain,
-		Driver:    site.Driver,
-		RAM:       site.RAM,
-		CPU:       site.CPU,
-		Env:       envs,
-		Domains:   domains,
-		CreatedAt: time.Now().Format(time.RFC3339),
+		Domain:     site.Domain,
+		Driver:     site.Driver,
+		DriverType: driver.Type,
+		RAM:        site.RAM,
+		CPU:        site.CPU,
+		Env:        envs,
+		Domains:    domains,
+		CreatedAt:  time.Now().Format(time.RFC3339),
 	}
 	metaJSON, _ := json.MarshalIndent(meta, "", "  ")
 	w, _ := zw.Create("metadata.json")
 	w.Write(metaJSON)
+
+	// Include compose .env for migration
+	if driver.Type == "compose" {
+		compDir := e.composeDir(site.Owner, domain)
+		if data, err := os.ReadFile(filepath.Join(compDir, ".env")); err == nil {
+			w, _ := zw.Create("compose_env")
+			w.Write(data)
+		}
+	}
 
 	zw.Close()
 
@@ -173,6 +183,18 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 	}
 	siteRoot, dataRoot := e.SiteDir(site.Owner, domain)
 
+	// Restore compose .env if present (must happen before restart)
+	for _, f := range zr.File {
+		if f.Name == "compose_env" {
+			compDir := e.composeDir(site.Owner, domain)
+			rc, _ := f.Open()
+			data, _ := io.ReadAll(rc)
+			rc.Close()
+			os.MkdirAll(compDir, 0755)
+			os.WriteFile(filepath.Join(compDir, ".env"), data, 0600)
+		}
+	}
+
 	// Extract files and data
 	for _, f := range zr.File {
 		if strings.HasPrefix(f.Name, "files/") {
@@ -212,13 +234,11 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 	// Import databases
 	driver, err := e.drivers.Load(meta.Driver)
 	if err == nil {
+		isCompose := driver.Type == "compose"
 		dbName := strings.ReplaceAll(domain, ".", "_")
 		dbUser := dbName
 
 		for _, dbCfg := range driver.Backup.Databases {
-			containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-
-			// Find matching dump in zip
 			dumpPrefix := fmt.Sprintf("databases/%s_%s.sql", dbCfg.Service, dbCfg.Type)
 			for _, f := range zr.File {
 				if !strings.HasPrefix(f.Name, dumpPrefix) {
@@ -242,17 +262,29 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 					continue
 				}
 
-				// Import via base64 to avoid shell injection
 				b64Dump := base64Encode(dump)
 				var importShell string
-				switch dbCfg.Type {
-				case "mysql":
-					importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -pbackup %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
-				case "postgres":
-					importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
-				}
-				if importShell != "" {
-					e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", importShell})
+				if isCompose {
+					switch dbCfg.Type {
+					case "mysql":
+						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u root -p\"$MYSQL_ROOT_PASSWORD\" < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump)
+					case "postgres":
+						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U \"${POSTGRES_USER:-postgres}\" -f /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump)
+					}
+					if importShell != "" {
+						e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, []string{"sh", "-c", importShell})
+					}
+				} else {
+					switch dbCfg.Type {
+					case "mysql":
+						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -pbackup %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
+					case "postgres":
+						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
+					}
+					if importShell != "" {
+						containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
+						e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", importShell})
+					}
 				}
 				break
 			}

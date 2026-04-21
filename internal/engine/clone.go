@@ -42,13 +42,28 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		return fmt.Errorf("create target site: %w", err)
 	}
 
-	// Copy site files
+	isCompose := driver.Type == "compose"
+
 	sourceRoot, sourceData := e.SiteDir(source.Owner, sourceDomain)
 	target, _ := e.db.GetSite(targetDomain)
 	targetRoot, targetData := e.SiteDir(target.Owner, targetDomain)
 
-	copyDir(sourceRoot, targetRoot)
-	copyDir(sourceData, targetData)
+	if isCompose {
+		// For compose sites: only copy storage/upload files, NOT raw DB data or compose config.
+		// The target already has its own compose setup with fresh secrets.
+		// We copy driver-defined backup paths (e.g., storage files).
+		for _, p := range driver.Backup.Paths {
+			srcPath := strings.ReplaceAll(p, "${site_root}", sourceRoot)
+			srcPath = strings.ReplaceAll(srcPath, "${data_root}", sourceData)
+			dstPath := strings.ReplaceAll(p, "${site_root}", targetRoot)
+			dstPath = strings.ReplaceAll(dstPath, "${data_root}", targetData)
+			copyDir(srcPath, dstPath)
+		}
+	} else {
+		// Normal sites: copy all files and data
+		copyDir(sourceRoot, targetRoot)
+		copyDir(sourceData, targetData)
+	}
 
 	// Copy env vars
 	envs, _ := parseEnvJSON(source.Env)
@@ -58,7 +73,6 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 	}
 
 	// Dump and import database
-	isCompose := driver.Type == "compose"
 	dbName := strings.ReplaceAll(sourceDomain, ".", "_")
 	dbUser := dbName
 	targetDbName := strings.ReplaceAll(targetDomain, ".", "_")
