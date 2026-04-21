@@ -88,7 +88,7 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	}
 
 	resources := container.Resources{
-		PidsLimit: func() *int64 { v := int64(256); return &v }(),
+		PidsLimit: func() *int64 { v := int64(512); return &v }(),
 	}
 	if cfg.MemoryMB > 0 {
 		resources.Memory = cfg.MemoryMB * 1024 * 1024
