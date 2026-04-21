@@ -113,21 +113,38 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		os.WriteFile(path, []byte(content), perm)
 	}
 
-	// Start compose
+	// Remove hardcoded container_name entries so Docker Compose uses <project>-<service>-1 naming.
+	// This allows multiple instances of the same compose stack on one server.
+	// Service-to-service communication uses service names via compose DNS (unaffected).
 	project := composeProjectName(opts.Domain)
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", filepath.Join(compDir, "docker-compose.yml"), "up", "-d")
+	composeFile := filepath.Join(compDir, "docker-compose.yml")
+	if data, err := os.ReadFile(composeFile); err == nil {
+		lines := strings.Split(string(data), "\n")
+		var cleaned []string
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "container_name:") {
+				continue // remove hardcoded container names
+			}
+			cleaned = append(cleaned, line)
+		}
+		os.WriteFile(composeFile, []byte(strings.Join(cleaned, "\n")), 0644)
+	}
+
+	// Start compose
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", project, "-f", composeFile, "up", "-d")
 	cmd.Dir = compDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose up: %s: %w", string(output), err)
 	}
 
 	// Connect Traefik to the compose network so it can route traffic
-	// Docker compose creates a network named <project>_default
 	composeNetwork := project + "_default"
 	e.docker.ConnectNetwork(ctx, composeNetwork, "apod-traefik")
 
-	// Add Traefik labels to the proxy service container
+	// Add Traefik routing config for the proxy service
 	if comp.ProxyService != "" && comp.ProxyPort != "" {
+		// Docker compose names containers as <project>-<service>-1
 		containerName := project + "-" + comp.ProxyService + "-1"
 		routerName := strings.ReplaceAll(opts.Domain, ".", "-")
 		labels := TraefikLabels(opts.Domain, []string{opts.Domain}, comp.ProxyPort, "")
