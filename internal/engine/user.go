@@ -136,6 +136,65 @@ func (e *Engine) ResetAPIKey(ctx context.Context, name string) (string, error) {
 	return rawKey, nil
 }
 
+func (e *Engine) TransferSite(ctx context.Context, domain, newOwner string) error {
+	site, err := e.db.GetSite(domain)
+	if err != nil {
+		return err
+	}
+
+	// Validate new owner exists (empty string = unassign / admin-owned)
+	if newOwner != "" {
+		if _, err := e.db.GetUserByName(newOwner); err != nil {
+			return fmt.Errorf("user %q not found", newOwner)
+		}
+	}
+
+	oldOwner := site.Owner
+
+	// Update DB
+	if err := e.db.UpdateSiteOwner(domain, newOwner); err != nil {
+		return err
+	}
+
+	// Move site files to new owner's directory
+	oldRoot, oldData := e.SiteDir(oldOwner, domain)
+	newRoot, newData := e.SiteDir(newOwner, domain)
+
+	if oldRoot != newRoot {
+		// Create new directories
+		os.MkdirAll(filepath.Dir(newRoot), 0755)
+		os.MkdirAll(filepath.Dir(newData), 0755)
+
+		// Move files
+		if err := os.Rename(oldRoot, newRoot); err != nil {
+			// If rename fails (cross-device), just update DB — files stay in place
+			e.LogActivity(domain, "transfer_warning", fmt.Sprintf("could not move files from %s to %s: %v", oldRoot, newRoot, err), "warning")
+		}
+		if err := os.Rename(oldData, newData); err != nil {
+			e.LogActivity(domain, "transfer_warning", fmt.Sprintf("could not move data from %s to %s: %v", oldData, newData, err), "warning")
+		}
+
+		// Set ownership on new directories
+		if newOwner != "" {
+			if user, err := e.db.GetUserByName(newOwner); err == nil {
+				os.Chown(newRoot, user.UID, user.UID)
+				os.Chown(newData, user.UID, user.UID)
+			}
+		}
+	}
+
+	// Reapply quotas for both old and new owners
+	if oldOwner != "" {
+		e.ApplyDiskQuota(ctx, oldOwner)
+	}
+	if newOwner != "" {
+		e.ApplyDiskQuota(ctx, newOwner)
+	}
+
+	e.LogActivity(domain, "transfer", fmt.Sprintf("transferred from %q to %q", oldOwner, newOwner), "success")
+	return nil
+}
+
 func (e *Engine) GetUserByAPIKeyHash(hash string) (*models.User, error) {
 	return e.db.GetUserByAPIKeyHash(hash)
 }

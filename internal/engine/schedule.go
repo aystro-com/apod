@@ -75,19 +75,19 @@ func (s *Scheduler) LoadSchedules() error {
 
 func durationToCron(d string) (string, error) {
 	switch d {
-	case "1h":
+	case "1h", "hourly":
 		return "0 * * * *", nil
 	case "6h":
 		return "0 */6 * * *", nil
 	case "12h":
 		return "0 */12 * * *", nil
-	case "24h":
+	case "24h", "daily":
 		return "0 0 * * *", nil
-	case "7d":
+	case "7d", "weekly":
 		return "0 0 * * 0", nil
-	case "30d":
+	case "30d", "monthly":
 		return "0 0 1 * *", nil
 	default:
-		return "", fmt.Errorf("unsupported duration %q", d)
+		return "", fmt.Errorf("unsupported duration %q (use: hourly, daily, weekly, monthly, 1h, 6h, 12h, 24h, 7d, 30d)", d)
 	}
 }

@@ -74,15 +74,35 @@ apod update
 
 - Linux server (Ubuntu 22.04+ recommended)
 - Docker Engine 24.0+
+- UFW firewall (recommended)
 - Go 1.22+ (for building from source)
 - Root access
 - Ports 80 and 443 available
-- `quota` package (for disk quota enforcement): `apt install quota`
+- `quota` package (for disk quota enforcement)
+
+### Install Dependencies
+
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+systemctl enable docker && systemctl start docker
+
+# Install UFW (firewall)
+apt install -y ufw
+ufw allow 22/tcp    # SSH
+ufw allow 80/tcp    # HTTP
+ufw allow 443/tcp   # HTTPS
+ufw allow 8443/tcp  # apod API (if using remote access)
+ufw --force enable
+
+# Install quota tools (for disk limits)
+apt install -y quota
+```
 
 ### Quick Install
 
 ```bash
-curl -sL https://github.com/aystro-com/apod/releases/latest/download/apod_linux_amd64.tar.gz | tar xz -C /usr/local/bin apod
+curl -fsSL https://raw.githubusercontent.com/aystro-com/apod/master/install.sh | sh
 mkdir -p /etc/apod/drivers
 apod update drivers
 ```
@@ -408,7 +428,7 @@ apod backup schedule list <domain>
 apod backup schedule remove <domain> <schedule-id>
 ```
 
-Intervals: `1h`, `6h`, `12h`, `24h`, `7d`, `30d`
+Intervals: `hourly`, `daily`, `weekly`, `monthly` (or `1h`, `6h`, `12h`, `24h`, `7d`, `30d`)
 
 ### Backup Storage
 
@@ -536,6 +556,8 @@ apod user create <name> [--role user|admin]  # Creates Linux user + API key
 apod user list                               # List all users
 apod user delete <name>                      # Remove user (must have no sites)
 apod user reset-key <name>                   # Generate new API key
+apod transfer <domain> <new-owner>           # Transfer site to another user
+apod transfer <domain> ""                    # Unassign site (admin-owned)
 ```
 
 **How it works:**
@@ -774,6 +796,7 @@ Error responses:
 | `GET` | `/api/v1/users` | List users | |
 | `DELETE` | `/api/v1/users/{name}` | Delete user | |
 | `POST` | `/api/v1/users/{name}/reset-key` | Reset API key | |
+| `POST` | `/api/v1/sites/{domain}/transfer` | Transfer site ownership | `{"owner": "newuser"}` |
 
 ### Terminal (secure container exec)
 
@@ -943,10 +966,19 @@ Every site is fully isolated. Tested against CPU miners, RAM bombs, fork bombs, 
 
 **Access control:**
 - **API auth**: SHA-256 hashed API keys, role-based (admin vs user)
-- **Ownership**: Users can only see/manage their own sites
-- **Web terminal**: Token-based (5min TTL, 100 command limit), proxied through billing panel, scoped to single container
+- **Ownership**: Users can only see/manage their own sites — enforced on every endpoint
+- **Rate limiting**: 60 requests/minute per IP on TCP connections (Unix socket bypasses)
+- **Web terminal**: Token-based (5min TTL, 100 command limit), word-boundary command filtering blocks dangerous operations and shell escapes (`$()`, backticks)
 - **Multi-user**: Linux user isolation with SFTP chroot for admin/agency users
 - **SSL**: Automatic Let's Encrypt via Traefik
+
+**Input validation:**
+- Domain names validated against strict regex (prevents container name injection)
+- Firewall ports validated (prevents command injection via ufw)
+- SSRF protection on uptime URLs and webhooks (blocks private IPs, loopback, metadata endpoints)
+- Database import uses base64 encoding (prevents shell injection via SQL dump content)
+- Error messages sanitized — 500 errors log details server-side, return generic message to client
+- Backup downloads validated against path traversal, zip restore protected against zip-slip
 
 ---
 

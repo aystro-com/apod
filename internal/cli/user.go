@@ -118,6 +118,26 @@ var userResetKeyCmd = &cobra.Command{
 	},
 }
 
+var transferCmd = &cobra.Command{
+	Use:   "transfer [domain] [new-owner]",
+	Short: "Transfer site ownership to another user (use '' to unassign)",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client := NewClient(flagRemote, flagKey)
+		body := map[string]string{"owner": args[1]}
+		_, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/transfer", args[0]), body)
+		if err != nil {
+			return err
+		}
+		if args[1] == "" {
+			fmt.Printf("Site %s unassigned (now admin-owned)\n", args[0])
+		} else {
+			fmt.Printf("Site %s transferred to %s\n", args[0], args[1])
+		}
+		return nil
+	},
+}
+
 func init() {
 	userCreateCmd.Flags().String("role", "user", "User role (admin or user)")
 	userCmd.AddCommand(userCreateCmd)
@@ -125,4 +145,5 @@ func init() {
 	userCmd.AddCommand(userDeleteCmd)
 	userCmd.AddCommand(userResetKeyCmd)
 	rootCmd.AddCommand(userCmd)
+	rootCmd.AddCommand(transferCmd)
 }

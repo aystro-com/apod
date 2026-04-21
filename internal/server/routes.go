@@ -1164,6 +1164,22 @@ func (h *Handler) DeleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+func (h *Handler) TransferSiteHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	var req struct {
+		Owner string `json:"owner"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.TransferSite(r.Context(), domain, req.Owner); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "transferred", "owner": req.Owner})
+}
+
 func (h *Handler) ResetAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	rawKey, err := h.engine.ResetAPIKey(r.Context(), name)

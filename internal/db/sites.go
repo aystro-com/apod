@@ -127,6 +127,21 @@ func (d *DB) UpdateSiteConfig(domain string, fields map[string]string) error {
 	return nil
 }
 
+func (d *DB) UpdateSiteOwner(domain, owner string) error {
+	result, err := d.conn.Exec(
+		`UPDATE sites SET owner = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`,
+		owner, domain,
+	)
+	if err != nil {
+		return fmt.Errorf("update site owner: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("site %q not found", domain)
+	}
+	return nil
+}
+
 func (d *DB) DeleteSite(domain string) error {
 	result, err := d.conn.Exec(`DELETE FROM sites WHERE domain = ?`, domain)
 	if err != nil {
