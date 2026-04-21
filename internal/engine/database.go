@@ -31,7 +31,7 @@ func (e *Engine) DBExport(ctx context.Context, domain string) (string, error) {
 	dbName := strings.ReplaceAll(domain, ".", "_")
 	dbUser := dbName
 
-	dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
+	dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser)
 	if dumpCmd == nil {
 		return "", fmt.Errorf("unsupported database type: %s", dbCfg.Type)
 	}
@@ -75,7 +75,7 @@ func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
 	var importCmd []string
 	switch dbCfg.Type {
 	case "mysql":
-		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -pbackup %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
+		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
 	case "postgres":
 		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
 	default:

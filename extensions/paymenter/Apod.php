@@ -54,12 +54,15 @@ class Apod extends Server
 
     public function getProductConfig($values = []): array
     {
+        // Fallback list — API fetch below overrides this with the real list
         $drivers = [
             ['label' => 'PHP + Nginx + MySQL', 'value' => 'php'],
             ['label' => 'Laravel', 'value' => 'laravel'],
             ['label' => 'WordPress', 'value' => 'wordpress'],
             ['label' => 'Node.js', 'value' => 'node'],
             ['label' => 'Static', 'value' => 'static'],
+            ['label' => 'Odoo ERP', 'value' => 'odoo'],
+            ['label' => 'Supabase', 'value' => 'supabase'],
         ];
 
         try {

@@ -61,7 +61,7 @@ var createCmd = &cobra.Command{
 
 func init() {
 	createCmd.Flags().StringVar(&flagDriver, "driver", "", "Driver to use (required)")
-	createCmd.Flags().StringVar(&flagRAM, "ram", "256M", "Memory limit")
+	createCmd.Flags().StringVar(&flagRAM, "ram", "512M", "Memory limit")
 	createCmd.Flags().StringVar(&flagCPU, "cpu", "1", "CPU limit")
 	createCmd.Flags().StringVar(&flagStorage, "storage", "0", "Disk storage limit (e.g., 5G, 500M)")
 	createCmd.Flags().StringVar(&flagRepo, "repo", "", "Git repository URL")

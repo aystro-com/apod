@@ -83,7 +83,7 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		if isCompose {
 			dumpCmd = composeDumpCommand(dbCfg.Type)
 		} else {
-			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
+			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser)
 		}
 		if dumpCmd == nil {
 			continue
@@ -117,7 +117,7 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		} else {
 			switch dbCfg.Type {
 			case "mysql":
-				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql -u%s -pbackup %s < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
+				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
 			case "postgres":
 				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U %s -d %s -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
 			}

@@ -18,6 +18,10 @@ func NewDriverLoader(dir string) *DriverLoader {
 	return &DriverLoader{dir: dir}
 }
 
+func (dl *DriverLoader) Dir() string {
+	return dl.dir
+}
+
 func (dl *DriverLoader) Load(name string) (*models.Driver, error) {
 	path := filepath.Join(dl.dir, name+".yaml")
 	data, err := os.ReadFile(path)

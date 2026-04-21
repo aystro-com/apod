@@ -17,10 +17,11 @@ import (
 	"github.com/aystro/apod/internal/storage"
 )
 
-func dbDumpCommand(dbType, dbName, dbUser, dbPass string) []string {
+func dbDumpCommand(dbType, dbName, dbUser string) []string {
 	switch dbType {
 	case "mysql":
-		return []string{"mysqldump", "-u" + dbUser, "-p" + dbPass, dbName}
+		// Use MYSQL_PASSWORD env var from container (set by driver)
+		return []string{"sh", "-c", fmt.Sprintf("mysqldump -u%s -p\"$MYSQL_PASSWORD\" %s", dbUser, dbName)}
 	case "postgres":
 		return []string{"pg_dumpall", "-U", dbUser}
 	case "mongo":
@@ -46,10 +47,10 @@ func composeDumpCommand(dbType string) []string {
 	}
 }
 
-func dbRestoreCommand(dbType, dbName, dbUser, dbPass, dumpFile string) []string {
+func dbRestoreCommand(dbType, dbName, dbUser, dumpFile string) []string {
 	switch dbType {
 	case "mysql":
-		return []string{"mysql", "-u" + dbUser, "-p" + dbPass, dbName, "-e", "source " + dumpFile}
+		return []string{"sh", "-c", fmt.Sprintf("mysql -u%s -p\"$MYSQL_PASSWORD\" %s -e 'source %s'", dbUser, dbName, dumpFile)}
 	case "postgres":
 		return []string{"psql", "-U", dbUser, "-d", dbName, "-f", dumpFile}
 	case "mongo":
@@ -137,7 +138,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 			// Compose sites: use superuser for dump (credentials come from compose .env)
 			dumpCmd = composeDumpCommand(dbCfg.Type)
 		} else {
-			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
+			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser)
 		}
 		if dumpCmd == nil {
 			continue

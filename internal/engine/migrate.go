@@ -55,7 +55,7 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir string) (stri
 	// Dump databases (gzip-compressed)
 	for _, dbCfg := range driver.Backup.Databases {
 		containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-		dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
+		dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser)
 		if dumpCmd == nil {
 			continue
 		}
@@ -277,7 +277,7 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 				} else {
 					switch dbCfg.Type {
 					case "mysql":
-						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -pbackup %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
+						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
 					case "postgres":
 						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
 					}

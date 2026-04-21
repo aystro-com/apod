@@ -171,28 +171,27 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 }
 
 func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {
-	drivers := []string{"static.yaml", "wordpress.yaml", "laravel.yaml", "php.yaml", "node.yaml", "paymenter.yaml", "unifi.yaml", "odoo.yaml", "supabase.yaml", "whmcs.yaml"}
-	var updated []string
+	// Discover available drivers from the GitHub repo instead of hardcoding a list
+	drivers, err := listRemoteDrivers()
+	if err != nil {
+		return nil, fmt.Errorf("list remote drivers: %w", err)
+	}
 
+	var updated []string
 	for _, name := range drivers {
 		url := driverRepoURL + name
 		resp, err := http.Get(url)
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != 200 {
 			continue
 		}
 
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			continue
-		}
-
-		driverPath := fmt.Sprintf("/etc/apod/drivers/%s", name)
-		if err := os.WriteFile(driverPath, data, 0644); err != nil {
+		driverPath := fmt.Sprintf("%s/%s", e.drivers.Dir(), name)
+		if err := os.WriteFile(driverPath, body, 0644); err != nil {
 			continue
 		}
 		updated = append(updated, name)
@@ -202,4 +201,29 @@ func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {
 		e.LogActivity("server", "drivers_update", fmt.Sprintf("updated: %v", updated), "success")
 	}
 	return updated, nil
+}
+
+// listRemoteDrivers discovers driver YAML files from the GitHub repo.
+func listRemoteDrivers() ([]string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/contents/drivers", githubRepo)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var files []struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&files); err != nil {
+		return nil, err
+	}
+
+	var drivers []string
+	for _, f := range files {
+		if len(f.Name) > 5 && f.Name[len(f.Name)-5:] == ".yaml" {
+			drivers = append(drivers, f.Name)
+		}
+	}
+	return drivers, nil
 }
