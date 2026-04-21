@@ -24,9 +24,14 @@ func (e *Engine) composeDir(owner, domain string) string {
 	return filepath.Join(dataRoot, "compose")
 }
 
-// composeCmd builds an exec.Cmd for docker compose with the right project and file.
+// composeCmd builds an exec.Cmd for docker compose with the right project and files.
+// Includes the override file if it exists (for labels, limits, security).
 func composeCmd(ctx context.Context, project, compDir string, args ...string) *exec.Cmd {
 	base := []string{"compose", "-p", project, "-f", filepath.Join(compDir, "docker-compose.yml")}
+	overridePath := filepath.Join(compDir, "docker-compose.override.yml")
+	if _, err := os.Stat(overridePath); err == nil {
+		base = append(base, "-f", overridePath)
+	}
 	cmd := exec.CommandContext(ctx, "docker", append(base, args...)...)
 	cmd.Dir = compDir
 	return cmd
