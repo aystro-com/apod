@@ -30,6 +30,21 @@ func dbDumpCommand(dbType, dbName, dbUser, dbPass string) []string {
 	}
 }
 
+// composeDumpCommand returns a dump command for compose-managed databases.
+// Uses default/superuser credentials since compose handles auth via env vars.
+func composeDumpCommand(dbType string) []string {
+	switch dbType {
+	case "mysql":
+		return []string{"sh", "-c", "mysqldump --all-databases -u root -p\"$MYSQL_ROOT_PASSWORD\""}
+	case "postgres":
+		return []string{"pg_dumpall", "-U", "supabase_admin"}
+	case "mongo":
+		return []string{"mongodump", "--archive"}
+	default:
+		return nil
+	}
+}
+
 func dbRestoreCommand(dbType, dbName, dbUser, dbPass, dumpFile string) []string {
 	switch dbType {
 	case "mysql":
@@ -113,13 +128,27 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	dbUser := dbName
 
 	// Dump databases (gzip-compressed)
+	isCompose := driver.Type == "compose"
 	for _, dbCfg := range driver.Backup.Databases {
-		containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-		dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
+		var dumpCmd []string
+		if isCompose {
+			// Compose sites: use superuser for dump (credentials come from compose .env)
+			dumpCmd = composeDumpCommand(dbCfg.Type)
+		} else {
+			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser, "backup")
+		}
 		if dumpCmd == nil {
 			continue
 		}
-		output, err := e.docker.ExecInContainer(ctx, containerName, dumpCmd)
+
+		var output string
+		var err error
+		if isCompose {
+			output, err = e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, dumpCmd)
+		} else {
+			containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
+			output, err = e.docker.ExecInContainer(ctx, containerName, dumpCmd)
+		}
 		if err != nil {
 			return 0, fmt.Errorf("dump %s database: %w", dbCfg.Type, err)
 		}
