@@ -31,10 +31,10 @@ func composeCmd(ctx context.Context, project, compDir string, args ...string) *e
 	return cmd
 }
 
-// sanitizeComposeFile makes a docker-compose.yml safe for multi-instance use:
-//   - Converts container_name: to hostname: (preserves internal hostname for apps that need it)
-//   - Docker Compose then uses <project>-<service>-<n> for the actual container name
-//   - Service-to-service DNS uses service names — unaffected by this change
+// sanitizeComposeFile makes a docker-compose.yml safe for apod:
+//   - Converts container_name: to hostname: (preserves internal hostname, allows multi-instance)
+//   - Removes host port bindings (Traefik handles external routing)
+//   - Removes the top-level "name:" field (we use -p flag for project naming)
 func sanitizeComposeFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -43,17 +43,40 @@ func sanitizeComposeFile(path string) error {
 
 	lines := strings.Split(string(data), "\n")
 	var out []string
+	inPorts := false
+	portsIndent := 0
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+
+		// Remove top-level "name:" (compose project name — we set via -p flag)
+		if strings.HasPrefix(line, "name:") {
+			continue
+		}
+
+		// Convert container_name to hostname
 		if strings.HasPrefix(trimmed, "container_name:") {
-			// Convert to hostname: so the container's internal hostname stays the same
-			// (some apps like Supabase Realtime parse their own hostname)
 			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 			name := strings.TrimSpace(strings.TrimPrefix(trimmed, "container_name:"))
 			name = strings.Trim(name, "\"'")
 			out = append(out, indent+"hostname: "+name)
 			continue
 		}
+
+		// Remove ports: section (host port bindings conflict with apod/Traefik)
+		if strings.HasPrefix(trimmed, "ports:") && !strings.HasPrefix(trimmed, "ports: [") {
+			inPorts = true
+			portsIndent = len(line) - len(strings.TrimLeft(line, " \t"))
+			continue
+		}
+		if inPorts {
+			lineIndent := len(line) - len(strings.TrimLeft(line, " \t"))
+			if trimmed == "" || lineIndent > portsIndent || strings.HasPrefix(trimmed, "-") {
+				continue // skip port entries
+			}
+			inPorts = false
+		}
+
 		out = append(out, line)
 	}
 
