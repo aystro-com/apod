@@ -14,7 +14,10 @@ type TerminalToken struct {
 	Token     string    `json:"token"`
 	Domain    string    `json:"domain"`
 	ExpiresAt time.Time `json:"expires_at"`
+	CmdCount  int       `json:"-"` // number of commands executed
 }
+
+const maxCommandsPerToken = 100
 
 var (
 	terminalTokens   = make(map[string]*TerminalToken)
@@ -58,22 +61,25 @@ func (e *Engine) CreateTerminalToken(ctx context.Context, domain string) (*Termi
 
 // ValidateTerminalToken checks if a token is valid and returns the domain
 func ValidateTerminalToken(token string) (string, error) {
-	terminalTokensMu.RLock()
-	t, exists := terminalTokens[token]
-	terminalTokensMu.RUnlock()
+	terminalTokensMu.Lock()
+	defer terminalTokensMu.Unlock()
 
+	t, exists := terminalTokens[token]
 	if !exists {
 		return "", fmt.Errorf("invalid token")
 	}
 
 	if time.Now().After(t.ExpiresAt) {
-		// Expired — clean up
-		terminalTokensMu.Lock()
 		delete(terminalTokens, token)
-		terminalTokensMu.Unlock()
 		return "", fmt.Errorf("token expired")
 	}
 
+	if t.CmdCount >= maxCommandsPerToken {
+		delete(terminalTokens, token)
+		return "", fmt.Errorf("token command limit reached — refresh the page for a new token")
+	}
+
+	t.CmdCount++
 	return t.Domain, nil
 }
 
@@ -102,6 +108,10 @@ func (e *Engine) ExecInSite(ctx context.Context, domain, command string) (string
 	output, err := e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", command})
 	if err != nil {
 		return "", fmt.Errorf("exec: %w", err)
+	}
+	// Cap output at 64KB to prevent abuse
+	if len(output) > 65536 {
+		output = output[:65536] + "\n... (output truncated)"
 	}
 	return output, nil
 }

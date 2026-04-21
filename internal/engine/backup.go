@@ -21,7 +21,7 @@ func dbDumpCommand(dbType, dbName, dbUser, dbPass string) []string {
 	case "mysql":
 		return []string{"mysqldump", "-u" + dbUser, "-p" + dbPass, dbName}
 	case "postgres":
-		return []string{"pg_dump", "-U", dbUser, dbName}
+		return []string{"pg_dumpall", "-U", dbUser}
 	case "mongo":
 		return []string{"mongodump", "--archive", "--db", dbName}
 	default:
@@ -97,8 +97,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
-	siteRoot := filepath.Join(e.dataDir, "sites", domain, "files")
-	dataRoot := filepath.Join(e.dataDir, "sites", domain, "data")
+	siteRoot, dataRoot := e.SiteDir(site.Owner, domain)
 	dbName := strings.ReplaceAll(domain, ".", "_")
 	dbUser := dbName
 
@@ -262,4 +261,15 @@ func (e *Engine) DeleteBackup(ctx context.Context, domain string, backupID int64
 
 func (e *Engine) ListBackups(ctx context.Context, domain string) ([]db.Backup, error) {
 	return e.db.ListBackups(domain)
+}
+
+func (e *Engine) GetBackupPath(ctx context.Context, domain string, backupID int64) (string, error) {
+	backup, err := e.db.GetBackup(backupID)
+	if err != nil {
+		return "", err
+	}
+	if backup.SiteDomain != domain {
+		return "", fmt.Errorf("backup does not belong to this site")
+	}
+	return backup.Path, nil
 }

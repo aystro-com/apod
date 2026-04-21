@@ -10,7 +10,7 @@ func TestDbExportCommand(t *testing.T) {
 	}
 
 	cmd = dbDumpCommand("postgres", "testdb", "testuser", "testpass")
-	if cmd[0] != "pg_dump" {
-		t.Errorf("expected pg_dump, got %s", cmd[0])
+	if cmd[0] != "pg_dumpall" {
+		t.Errorf("expected pg_dumpall, got %s", cmd[0])
 	}
 }

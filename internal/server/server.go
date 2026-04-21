@@ -57,6 +57,7 @@ func New(e *engine.Engine) *Server {
 		// Backup management
 		r.Post("/sites/{domain}/backups", h.CreateBackupHandler)
 		r.Get("/sites/{domain}/backups", h.ListBackupsHandler)
+		r.Post("/sites/{domain}/backups/download", h.DownloadBackupHandler)
 		r.Post("/sites/{domain}/backups/restore", h.RestoreBackupHandler)
 		r.Delete("/sites/{domain}/backups", h.DeleteBackupHandler)
 

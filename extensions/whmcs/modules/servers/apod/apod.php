@@ -229,7 +229,7 @@ function apod_ClientArea(array $params)
 
             $html .= '<hr><h4>Container Shell</h4>';
             $html .= '<p class="text-muted">Commands run inside your isolated container. Token expires in 5 minutes — refresh for a new one.</p>';
-            $html .= '<div style="background:#1e1e1e;border-radius:6px;padding:15px;font-family:monospace;color:#0f0;max-height:400px;overflow-y:auto" id="apod-terminal-output">';
+            $html .= '<div style="background:#1e1e1e;border-radius:6px;padding:15px;font-family:monospace;font-size:13px;color:#0f0;min-height:300px;max-height:500px;overflow-y:auto;text-align:left" id="apod-terminal-output">';
             $html .= '<div>Welcome to ' . htmlspecialchars($domain) . '</div>';
             $html .= '<div>Type a command and press Enter.</div><div>&nbsp;</div>';
             $html .= '</div>';
@@ -298,7 +298,7 @@ function apod_ClientArea(array $params)
 
         if (is_array($backups) && count($backups) > 0) {
             $html .= '<table class="table table-condensed table-striped">';
-            $html .= '<thead><tr><th>ID</th><th>Storage</th><th>Size</th><th>Date</th></tr></thead><tbody>';
+            $html .= '<thead><tr><th>ID</th><th>Storage</th><th>Size</th><th>Date</th><th></th></tr></thead><tbody>';
             foreach ($backups as $b) {
                 $size = isset($b['size_bytes']) ? round($b['size_bytes'] / 1024 / 1024, 1) . ' MB' : '-';
                 $html .= '<tr>';
@@ -306,6 +306,7 @@ function apod_ClientArea(array $params)
                 $html .= '<td>' . ($b['storage_name'] ?? 'local') . '</td>';
                 $html .= '<td>' . $size . '</td>';
                 $html .= '<td>' . ($b['created_at'] ?? '-') . '</td>';
+                $html .= '<td><a href="clientarea.php?action=productdetails&id=' . ($params['serviceid'] ?? '') . '&modop=custom&a=downloadBackup&backup_id=' . ($b['id'] ?? '') . '" class="btn btn-xs btn-default">Download</a></td>';
                 $html .= '</tr>';
             }
             $html .= '</tbody></table>';
@@ -337,6 +338,7 @@ function apod_ClientAreaCustomButtonArray(array $params = [])
     if (!empty($params['configoption6'])) {
         $buttons['Create Backup'] = 'createBackup';
         $buttons['Restore Latest Backup'] = 'restoreBackup';
+        $buttons['Download Backup'] = 'downloadBackup';
     }
 
     return $buttons;
@@ -469,6 +471,41 @@ function apod_restoreBackup(array $params)
     $response = apod_request($params, '/sites/' . $domain . '/backups/restore', 'POST', [
         'backup_id' => $latestId,
     ]);
+    if ($response['error']) {
+        return $response['error'];
+    }
+
+    return 'success';
+}
+
+function apod_downloadBackup(array $params)
+{
+    $domain = apod_getDomain($params);
+    if (empty($domain)) {
+        return 'Domain is required';
+    }
+    if (empty($params['configoption6'])) {
+        return 'Backups are not enabled for this product';
+    }
+
+    // Get latest backup
+    $listResp = apod_request($params, '/sites/' . $domain . '/backups', 'GET');
+    $backups = $listResp['data'] ?? [];
+
+    if (empty($backups)) {
+        return 'No backups available';
+    }
+
+    $latestId = end($backups)['id'] ?? null;
+    if (!$latestId) {
+        return 'No backup found';
+    }
+
+    // Download via the API
+    $response = apod_request($params, '/sites/' . $domain . '/backups/download', 'POST', [
+        'backup_id' => $latestId,
+    ]);
+
     if ($response['error']) {
         return $response['error'];
     }

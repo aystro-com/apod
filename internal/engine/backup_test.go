@@ -39,7 +39,7 @@ func TestDbDumpCommand(t *testing.T) {
 		wantCmd string
 	}{
 		{"mysql", "mysqldump"},
-		{"postgres", "pg_dump"},
+		{"postgres", "pg_dumpall"},
 		{"mongo", "mongodump"},
 	}
 	for _, tt := range tests {

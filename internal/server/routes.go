@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/aystro/apod/internal/engine"
 	"github.com/go-chi/chi/v5"
@@ -313,6 +314,28 @@ func (h *Handler) ListBackupsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, backups)
+}
+
+func (h *Handler) DownloadBackupHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	var req struct {
+		BackupID int64 `json:"backup_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	path, err := h.engine.GetBackupPath(r.Context(), domain, req.BackupID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename="+domain+"_backup.zip")
+	w.Header().Set("Content-Type", "application/zip")
+	http.ServeFile(w, r, path)
 }
 
 func (h *Handler) RestoreBackupHandler(w http.ResponseWriter, r *http.Request) {
@@ -1053,15 +1076,24 @@ func (h *Handler) TerminalExecHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"output": output})
 }
 
-// isCommandSafe blocks dangerous commands that could escape the container
+// isCommandSafe blocks dangerous commands
 func isCommandSafe(cmd string) bool {
-	// Block empty commands
-	if cmd == "" {
+	if cmd == "" || len(cmd) > 4096 {
 		return false
 	}
-	// Max command length
-	if len(cmd) > 4096 {
-		return false
+	// Block commands that could affect the host or other containers
+	blocked := []string{
+		"mount", "umount", "insmod", "rmmod", "modprobe",
+		"iptables", "ip6tables", "nftables",
+		"reboot", "shutdown", "halt", "poweroff", "init 0",
+		"mkfs", "fdisk", "dd if=/dev",
+		"nsenter", "unshare",
+	}
+	lower := strings.ToLower(cmd)
+	for _, b := range blocked {
+		if strings.Contains(lower, b) {
+			return false
+		}
 	}
 	return true
 }
