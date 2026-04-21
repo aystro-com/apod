@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 )
@@ -54,8 +55,15 @@ var updateCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Println("\nRestart apod server to use the new version:")
-		fmt.Println("  systemctl restart apod")
+		// Auto-restart if running under systemd
+		fmt.Println("\nRestarting apod server...")
+		restartCmd := exec.Command("systemctl", "restart", "apod")
+		if err := restartCmd.Run(); err != nil {
+			fmt.Println("Auto-restart failed. Restart manually:")
+			fmt.Println("  systemctl restart apod")
+		} else {
+			fmt.Println("apod restarted successfully.")
+		}
 		return nil
 	},
 }

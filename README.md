@@ -857,13 +857,31 @@ Same provisioning lifecycle — create, suspend, unsuspend, terminate via apod's
 
 ## Security Model
 
-- **Container isolation**: Every site runs in its own Docker container with resource limits (RAM, CPU, disk)
-- **No host access**: Billing customers only access their container — never the host system
-- **Web terminal**: Token-based (5min TTL), scoped to a single container, commands run inside Docker only
-- **Multi-user**: Linux user isolation with SFTP chroot for admin/agency users
+Every site is fully isolated. Tested against CPU miners, RAM bombs, fork bombs, disk bombs, network attacks, and container escape attempts.
+
+**Resource isolation (kernel-enforced):**
+- **CPU**: Docker `NanoCPUs` — hard cap per core. A crypto miner in one container can't affect others.
+- **RAM**: Docker `Memory` — OOM killer scoped to the container only. Other sites unaffected.
+- **Disk**: Linux `setquota` — writes fail with "Disk quota exceeded" at the limit.
+- **Processes**: `PidsLimit` (default 512, configurable) — fork bombs hit the limit and stop.
+
+**Network isolation:**
+- Each site gets its own Docker network (`apod-site-<domain>`). Only that site's containers and Traefik are connected.
+- Sites cannot resolve, ping, or connect to other sites' containers or databases.
+
+**Container hardening:**
+- All Linux capabilities dropped (`CapDrop: ALL`), only 6 minimal ones added (CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, NET_BIND_SERVICE)
+- `no-new-privileges` prevents privilege escalation
+- No Docker socket access
+- No host filesystem visibility
+- Cannot mount filesystems, change sysctl, load kernel modules, or change hostname
+- Container only sees its own processes (not host processes)
+
+**Access control:**
 - **API auth**: SHA-256 hashed API keys, role-based (admin vs user)
 - **Ownership**: Users can only see/manage their own sites
-- **Disk quotas**: Kernel-enforced via Linux `setquota`
+- **Web terminal**: Token-based (5min TTL, 100 command limit), proxied through billing panel, scoped to single container
+- **Multi-user**: Linux user isolation with SFTP chroot for admin/agency users
 - **SSL**: Automatic Let's Encrypt via Traefik
 
 ---
