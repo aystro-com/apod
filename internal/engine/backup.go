@@ -145,8 +145,8 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 
 		var output string
 		var err error
-		// Retry up to 3 times (container may still be starting after stop/start)
-		for attempt := 0; attempt < 3; attempt++ {
+		// Retry up to 6 times with 10s delay (container may still be starting)
+		for attempt := 0; attempt < 6; attempt++ {
 			if isCompose {
 				output, err = e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, dumpCmd)
 			} else {
@@ -156,7 +156,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 			if err == nil {
 				break
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(10 * time.Second)
 		}
 		if err != nil {
 			return 0, fmt.Errorf("dump %s database: %w", dbCfg.Type, err)
