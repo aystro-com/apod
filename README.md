@@ -7,12 +7,18 @@ A single binary that turns any VPS into a hosting platform. Deploy sites, manage
 Hosting panels are bloated. PaaS platforms are expensive. Kubernetes is overkill for most workloads. apod sits in the sweet spot: one binary, zero dependencies beyond Docker, full isolation per site.
 
 - **One binary** — drop it on a server and go
-- **Docker-native** — every site runs in its own container stack
+- **Docker-native** — every site runs in its own isolated container stack
 - **Automatic SSL** — Let's Encrypt via Traefik, zero config
-- **Driver system** — define stacks as YAML (Laravel, WordPress, Node.js, or roll your own)
+- **Driver system** — define stacks as YAML (PHP, Laravel, WordPress, Node.js, Odoo, or roll your own)
 - **Git deploys** — push to deploy with rollback support
-- **Backups** — scheduled backups to S3, R2, SFTP, or local
+- **Backups** — scheduled backups to S3, R2, SFTP, or local with download/restore
 - **CLI + REST API** — script everything, automate anything
+- **Multi-user** — Linux-level isolation with API key auth and ownership enforcement
+- **Resource limits** — CPU, RAM, disk quotas, PID limits — all kernel-enforced
+- **Network isolation** — each site gets its own Docker network, can't reach other sites
+- **Billing integration** — WHMCS and Paymenter modules for automated provisioning
+- **SaaS-ify anything** — turn any Docker app into a managed service in minutes
+- **Web terminal** — secure token-based container shell access via billing panel
 
 ## Quick Start
 
@@ -23,17 +29,29 @@ curl -fsSL https://raw.githubusercontent.com/aystro-com/apod/master/install.sh |
 # Initialize (sets up systemd, SSL email, drivers)
 apod init
 
-# Create a blank PHP site (like CloudPanel)
-apod create mysite.com --driver php
+# Create a PHP site with resource limits
+apod create mysite.com --driver php --ram 512M --cpu 1 --storage 5G
 
-# Or create and deploy a Laravel app from git in one command
+# Deploy a Laravel app from git in one command
 apod create myapp.com --driver laravel --repo https://github.com/you/app.git --branch main
 
-# Shell into a site
+# Deploy an Odoo ERP instance
+apod create erp.mycompany.com --driver odoo --ram 2G --cpu 2 --storage 20G
+
+# Shell into a site's container
 apod access mysite.com
 
-# Check status
+# Check status and resource usage
 apod list
+apod status mysite.com
+apod top
+
+# Create a user for multi-tenant hosting
+apod user create client1 --role user
+# → Returns an API key for remote management
+
+# Update apod + drivers (auto-restarts)
+apod update
 ```
 
 ## Table of Contents
@@ -43,6 +61,8 @@ apod list
 - [Drivers](#drivers)
 - [CLI Reference](#cli-reference)
 - [REST API Reference](#rest-api-reference)
+- [Billing Integrations](#billing-integrations)
+- [Security Model](#security-model)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
 
@@ -106,12 +126,10 @@ systemctl start apod
 ### Updating
 
 ```bash
-apod update              # Update binary + drivers in one command
+apod update              # Update binary + drivers + auto-restart daemon
 apod update drivers      # Update built-in drivers only
 apod version             # Check current version
 ```
-
-After updating, restart the daemon: `systemctl restart apod`
 
 ---
 
@@ -175,6 +193,10 @@ Drivers are YAML files that define application stacks. Each driver specifies Doc
 | `node` | Node.js + PostgreSQL | `node:22-alpine` + `postgres:16-alpine` |
 | `odoo` | Odoo ERP + PostgreSQL | `odoo:17.0` + `postgres:16-alpine` |
 | `unifi` | UniFi Network Controller + MongoDB | `jacobalberty/unifi:latest` + `mongo:4.4` |
+| `paymenter` | Paymenter billing + MySQL + Redis | `webdevops/php-nginx-dev:8.3` + `mysql:8.0` + `redis:7` |
+| `whmcs` | WHMCS + MySQL + ionCube | `php:8.2-apache` + `mysql:8.0` |
+
+**SaaS-ify any app:** Write a 20-40 line YAML driver for any Docker app, connect a billing panel, and sell managed instances. We went from zero to selling managed Odoo in under 30 minutes.
 
 ### Writing a Custom Driver
 
@@ -300,7 +322,7 @@ apod domain list <site-domain>
 
 ### Resource Limits
 
-All limits are enforced at the kernel/Docker level — no bypass possible.
+All limits are enforced at the kernel/Docker level — no bypass possible. Tested against crypto miners, RAM bombs, fork bombs, and disk bombs.
 
 ```bash
 apod create mysite.com --driver php --ram 512M --cpu 2 --storage 10G
@@ -310,9 +332,12 @@ apod config set mysite.com --set-key storage --set-value 20G
 
 | Resource | Flag | Enforcement | Effect |
 |----------|------|-------------|--------|
-| RAM | `--ram 256M` | Docker memory limit | OOM kill if exceeded |
-| CPU | `--cpu 1` | Docker CPU limit | Hard cap on CPU time |
+| RAM | `--ram 256M` | Docker memory limit | OOM kill inside container only, auto-restart |
+| CPU | `--cpu 1` | Docker CPU limit | Hard cap per core, other sites unaffected |
 | Disk | `--storage 5G` | Linux `setquota` on user UID | `Disk quota exceeded` error on write |
+| Processes | Default 512 | Docker PidsLimit | Fork bombs hit limit and stop |
+
+**Process limit:** The default PID limit is 512 per container (sufficient for PHP-FPM, MySQL, Node.js, etc.). If a site needs more (e.g., a heavy Java app), increase it in the driver or per-site config.
 
 **Disk quota setup** (one-time, required for `--storage` to work):
 
@@ -326,6 +351,8 @@ quotaon /
 Add `usrquota` to `/etc/fstab` for persistence across reboots.
 
 Disk quotas apply per user — the total storage for all of a user's sites is summed and enforced as one quota on their Linux UID. Admin-owned sites (no `--owner`) have no disk quota.
+
+**Network isolation:** Each site gets its own Docker network. Sites cannot resolve, connect to, or port-scan other sites' containers or databases. Only Traefik connects to all site networks for routing.
 
 ### Configuration
 
@@ -537,11 +564,20 @@ apod logs <domain>           # Operations for a specific site
 
 ```bash
 apod version                 # Show version + DB schema version
-apod update                  # Self-update binary + drivers from GitHub releases
+apod update                  # Self-update binary + drivers + auto-restart daemon
 apod update drivers          # Pull latest driver YAMLs only
 apod driver list             # Show installed drivers
 apod init                    # First-run setup (Docker check, SSL email, systemd)
 ```
+
+### Server Daemon
+
+```bash
+apod server --acme-email you@example.com                    # Listen on Unix socket only
+apod server --acme-email you@example.com --listen 0.0.0.0:8443  # Socket + TCP (for remote/billing API)
+```
+
+When `--listen` is set, both the Unix socket (admin, local) and TCP (authenticated, remote) listeners run simultaneously.
 
 ---
 
@@ -746,7 +782,13 @@ Error responses:
 | `POST` | `/api/v1/sites/{domain}/terminal` | Generate exec token (5min TTL) | |
 | `POST` | `/api/v1/terminal/exec` | Execute command with token | `{"token": "term_...", "command": "ls"}` |
 
-Token-based access — no API key needed for exec, the token IS the auth. Tokens expire after 5 minutes and are single-domain scoped. Commands run inside the site's app container only.
+Token-based access — no API key needed for exec, the token IS the auth. Security features:
+- Tokens expire after 5 minutes
+- Single-domain scoped (can't access other sites)
+- 100 command limit per token
+- Dangerous commands blocked (mount, insmod, reboot, etc.)
+- Output capped at 64KB
+- Commands run inside the site's app container only — never the host
 
 ### Activity Log
 
@@ -770,16 +812,22 @@ Token-based access — no API key needed for exec, the token IS the auth. Tokens
 ## Architecture
 
 ```
-apod (single binary)
+apod (single binary, ~15k lines of Go)
   CLI ──── commands that talk to the daemon via Unix socket or HTTP
   API ──── REST endpoints for everything the CLI can do
   Engine
-    Docker ──── container lifecycle, image pulls, exec
+    Docker ──── container lifecycle, image pulls, exec, per-site networks
     Traefik ──── reverse proxy, SSL termination, routing
     Drivers ──── pluggable app stacks defined as YAML
+    Users ────── multi-user with Linux UID isolation
+    Quotas ───── CPU, RAM, disk, PID limits
+    Terminal ─── secure token-based container exec
     Scheduler ── backup schedules + cron jobs (robfig/cron)
     Uptime ───── background HTTP checker with alerts
-    SQLite ───── all state in one file
+    SQLite ───── all state in one file (versioned migrations)
+  Billing
+    WHMCS ────── provisioning module (PHP)
+    Paymenter ── server extension (PHP)
 ```
 
 ### How Routing Works
@@ -851,7 +899,23 @@ Install: copy `extensions/whmcs/modules/servers/apod/` to your WHMCS `/modules/s
 
 Install: copy `extensions/paymenter/Apod.php` to your Paymenter `/extensions/Servers/Apod/` directory.
 
-Same provisioning lifecycle — create, suspend, unsuspend, terminate via apod's REST API.
+**Server setup**: Configure with apod host URL and admin API key.
+
+**Features:**
+- Same provisioning lifecycle — create, suspend, unsuspend, terminate
+- Product configuration: driver, RAM, CPU, storage per product
+- Fetches available drivers from apod API dynamically
+
+### SaaS-ify Any App
+
+The billing integration makes it trivial to turn any Docker application into a managed service:
+
+1. Write a YAML driver (20-40 lines) for your app
+2. Add it to `/etc/apod/drivers/`
+3. Create a product in WHMCS/Paymenter with pricing
+4. Customers buy → isolated instance provisioned automatically with SSL
+
+We tested this with Odoo ERP — from idea to selling managed instances in under 30 minutes. The same approach works for n8n, Metabase, Gitea, Nextcloud, or any custom application.
 
 ---
 
