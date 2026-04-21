@@ -1,7 +1,9 @@
 package server
 
 import (
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -79,9 +81,14 @@ func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) htt
 				return
 			}
 
-			ip := r.RemoteAddr
+			// Extract IP without port
+			ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if ip == "" {
+				ip = r.RemoteAddr
+			}
 			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				ip = forwarded
+				// Take the first IP in the chain (client IP)
+				ip = strings.TrimSpace(strings.Split(forwarded, ",")[0])
 			}
 
 			if !limiter.allow(ip) {
