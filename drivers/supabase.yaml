@@ -157,6 +157,11 @@ files:
           keyauth_credentials:
             - key: ${service_role_key}
 
+      - username: DASHBOARD
+        basicauth_credentials:
+          - username: ${dashboard_username}
+            password: ${dashboard_password}
+
       acls:
         - consumer: anon
           group: anon
@@ -299,30 +304,28 @@ files:
   - path: "${data_root}/kong/init-db.sh"
     content: |
       #!/bin/bash
-      set -e
+      # Idempotent Supabase role/schema initialization
+      # Note: supabase/postgres image already creates supabase_admin (superuser),
+      # supabase_auth_admin, supabase_storage_admin, anon, authenticated, service_role
+      psql --username "supabase_admin" --dbname "postgres" <<-EOSQL
+        -- Create missing roles
+        DO \$\$BEGIN CREATE ROLE authenticator NOINHERIT LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
+        DO \$\$BEGIN CREATE ROLE supabase_realtime_admin NOINHERIT LOGIN PASSWORD '${POSTGRES_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;
 
-      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-        -- Supabase required roles
-        CREATE ROLE anon NOLOGIN NOINHERIT;
-        CREATE ROLE authenticated NOLOGIN NOINHERIT;
-        CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
-        CREATE ROLE supabase_auth_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${POSTGRES_PASSWORD}';
-        CREATE ROLE supabase_storage_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${POSTGRES_PASSWORD}';
-        CREATE ROLE supabase_admin LOGIN CREATEROLE CREATEDB REPLICATION BYPASSRLS PASSWORD '${POSTGRES_PASSWORD}';
-        CREATE ROLE authenticator NOINHERIT LOGIN PASSWORD '${POSTGRES_PASSWORD}';
+        -- Set passwords for existing roles
+        ALTER ROLE supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
+        ALTER ROLE supabase_storage_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
+        ALTER ROLE authenticator WITH PASSWORD '${POSTGRES_PASSWORD}';
 
+        -- Grant memberships
         GRANT anon TO authenticator;
         GRANT authenticated TO authenticator;
         GRANT service_role TO authenticator;
         GRANT supabase_admin TO authenticator;
 
-        GRANT ALL PRIVILEGES ON DATABASE postgres TO supabase_admin;
-        ALTER DATABASE postgres OWNER TO supabase_admin;
-
         -- Auth schema
         CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
         GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON TABLES TO supabase_auth_admin;
 
         -- Storage schema
         CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin;
@@ -331,15 +334,14 @@ files:
         -- Realtime schema
         CREATE SCHEMA IF NOT EXISTS _realtime;
         GRANT ALL ON SCHEMA _realtime TO supabase_admin;
-        CREATE ROLE supabase_realtime_admin NOINHERIT LOGIN PASSWORD '${POSTGRES_PASSWORD}';
         GRANT ALL ON SCHEMA _realtime TO supabase_realtime_admin;
 
         -- Extensions
-        CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions;
-        CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
-        CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
+        CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
+        CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
+        CREATE EXTENSION IF NOT EXISTS pgjwt SCHEMA extensions;
 
-        -- Grant public usage
+        -- Public schema grants
         GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
         GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
         GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;

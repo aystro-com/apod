@@ -225,7 +225,11 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("create directory for %s: %w", f.Path, err)
 		}
-		if err := os.WriteFile(f.Path, []byte(f.Content), 0644); err != nil {
+		perm := os.FileMode(0644)
+		if strings.HasSuffix(f.Path, ".sh") {
+			perm = 0755
+		}
+		if err := os.WriteFile(f.Path, []byte(f.Content), perm); err != nil {
 			return fmt.Errorf("write file %s: %w", f.Path, err)
 		}
 	}
