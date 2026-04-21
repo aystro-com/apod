@@ -1,353 +1,76 @@
 name: supabase
 version: "1.0"
 description: Supabase (PostgreSQL + Auth + REST + Realtime + Storage + Studio)
+type: compose
+
+compose:
+  repo: "https://github.com/supabase/supabase.git"
+  branch: "master"
+  path: "docker"
+  proxy_service: "kong"
+  proxy_port: "8000"
+  env:
+    # Core
+    SITE_URL: "https://${site_domain}"
+    API_EXTERNAL_URL: "https://${site_domain}"
+    SUPABASE_PUBLIC_URL: "https://${site_domain}"
+    STUDIO_DEFAULT_ORGANIZATION: "apod"
+    STUDIO_DEFAULT_PROJECT: "${site_domain}"
+    STUDIO_PORT: "3000"
+    # Ports (internal only — Traefik handles external)
+    KONG_HTTP_PORT: "8000"
+    KONG_HTTPS_PORT: "8443"
+    # Postgres
+    POSTGRES_PASSWORD: "${site_db_pass}"
+    POSTGRES_HOST: "db"
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: "postgres"
+    # Auth
+    JWT_SECRET: "${jwt_secret}"
+    JWT_EXPIRY: "3600"
+    ANON_KEY: "${anon_key}"
+    SERVICE_ROLE_KEY: "${service_role_key}"
+    # Dashboard
+    DASHBOARD_USERNAME: "${dashboard_username}"
+    DASHBOARD_PASSWORD: "${dashboard_password}"
+    # Secrets
+    SECRET_KEY_BASE: "${secret_key_base}"
+    VAULT_ENC_KEY: "${vault_enc_key}"
+    # Misc
+    ADDITIONAL_REDIRECT_URLS: ""
+    ENABLE_EMAIL_SIGNUP: "true"
+    ENABLE_EMAIL_AUTOCONFIRM: "true"
+    ENABLE_ANONYMOUS_USERS: "false"
+    ENABLE_PHONE_SIGNUP: "false"
+    ENABLE_PHONE_AUTOCONFIRM: "false"
+    # SMTP (disabled by default — configure for production)
+    SMTP_ADMIN_EMAIL: "admin@${site_domain}"
+    SMTP_HOST: "supabase-mail"
+    SMTP_PORT: "2500"
+    SMTP_USER: ""
+    SMTP_PASS: ""
+    SMTP_SENDER_NAME: "Supabase"
+    # Storage
+    S3_PROTOCOL_ACCESS_KEY_ID: "${s3_access_key_id}"
+    S3_PROTOCOL_ACCESS_KEY_SECRET: "${s3_access_key_secret}"
+    STORAGE_FILE_SIZE_LIMIT: "52428800"
+    # Pooler
+    POOLER_PROXY_PORT_TRANSACTION: "6543"
+    POOLER_DEFAULT_POOL_SIZE: "20"
+    POOLER_MAX_CLIENT_CONN: "100"
+    POOLER_TENANT_ID: "default-tenant"
+    # Analytics
+    LOGFLARE_API_KEY: "${logflare_private_token}"
+    LOGFLARE_LOGGER_BACKEND_API_KEY: "${logflare_private_token}"
+    # Meta
+    PG_META_CRYPTO_KEY: "${pg_meta_crypto_key}"
 
 parameters:
   dashboard_username:
     type: string
     default: "supabase"
-  studio_port:
-    type: string
-    default: "3000"
-
-services:
-  db:
-    image: "supabase/postgres:15.8.1.085"
-    volumes:
-      - "${data_root}/postgres:/var/lib/postgresql/data"
-      - "${data_root}/init:/docker-entrypoint-initdb.d:ro"
-    environment:
-      POSTGRES_PASSWORD: "${site_db_pass}"
-      POSTGRES_DB: "postgres"
-      JWT_SECRET: "${jwt_secret}"
-      JWT_EXP: "3600"
-
-  kong:
-    image: "kong/kong:3.9.1"
-    volumes:
-      - "${data_root}/kong/kong.yml:/home/kong/kong.yml:ro"
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: "/home/kong/kong.yml"
-      KONG_DNS_ORDER: "LAST,A,CNAME"
-      KONG_PLUGINS: "request-transformer,cors,key-auth,acl,basic-auth"
-      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: "160k"
-      KONG_NGINX_PROXY_PROXY_BUFFERS: "64 160k"
-      SUPABASE_ANON_KEY: "${anon_key}"
-      SUPABASE_SERVICE_KEY: "${service_role_key}"
-      DASHBOARD_USERNAME: "${dashboard_username}"
-      DASHBOARD_PASSWORD: "${dashboard_password}"
-    ports:
-      - "8000"
-
-  auth:
-    image: "supabase/gotrue:v2.186.0"
-    environment:
-      GOTRUE_API_HOST: "0.0.0.0"
-      GOTRUE_API_PORT: "9999"
-      API_EXTERNAL_URL: "https://${site_domain}"
-      GOTRUE_DB_DRIVER: "postgres"
-      GOTRUE_DB_DATABASE_URL: "postgres://supabase_auth_admin:${site_db_pass}@apod-${site_domain}-db:5432/postgres"
-      GOTRUE_SITE_URL: "https://${site_domain}"
-      GOTRUE_URI_ALLOW_LIST: ""
-      GOTRUE_JWT_ADMIN_ROLES: "service_role"
-      GOTRUE_JWT_AUD: "authenticated"
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
-      GOTRUE_JWT_SECRET: "${jwt_secret}"
-      GOTRUE_JWT_EXP: "3600"
-      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
-      GOTRUE_MAILER_AUTOCONFIRM: "true"
-      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
-      GOTRUE_SMS_AUTOCONFIRM: "true"
-
-  rest:
-    image: "postgrest/postgrest:v14.8"
-    environment:
-      PGRST_DB_URI: "postgres://authenticator:${site_db_pass}@apod-${site_domain}-db:5432/postgres"
-      PGRST_DB_SCHEMAS: "public,storage,graphql_public"
-      PGRST_DB_ANON_ROLE: "anon"
-      PGRST_JWT_SECRET: "${jwt_secret}"
-      PGRST_DB_USE_LEGACY_GUCS: "false"
-      PGRST_APP_SETTINGS_JWT_SECRET: "${jwt_secret}"
-      PGRST_APP_SETTINGS_JWT_EXP: "3600"
-
-  realtime:
-    image: "supabase/realtime:v2.76.5"
-    environment:
-      PORT: "4000"
-      DB_HOST: "apod-${site_domain}-db"
-      DB_PORT: "5432"
-      DB_USER: "supabase_admin"
-      DB_PASSWORD: "${site_db_pass}"
-      DB_NAME: "postgres"
-      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
-      DB_ENC_KEY: "supabaserealtime"
-      API_JWT_SECRET: "${jwt_secret}"
-      SECRET_KEY_BASE: "${secret_key_base}"
-      ERL_AFLAGS: "-proto_dist inet_tcp"
-      SEED_SELF_HOST: "true"
-      APP_NAME: "realtime"
-
-  storage:
-    image: "supabase/storage-api:v1.48.26"
-    volumes:
-      - "${data_root}/storage:/var/lib/storage"
-    environment:
-      ANON_KEY: "${anon_key}"
-      SERVICE_KEY: "${service_role_key}"
-      AUTH_JWT_SECRET: "${jwt_secret}"
-      POSTGREST_URL: "http://apod-${site_domain}-rest:3000"
-      DATABASE_URL: "postgres://supabase_storage_admin:${site_db_pass}@apod-${site_domain}-db:5432/postgres"
-      FILE_SIZE_LIMIT: "52428800"
-      STORAGE_BACKEND: "file"
-      FILE_STORAGE_BACKEND_PATH: "/var/lib/storage"
-      TENANT_ID: "stub"
-      REGION: "stub"
-      GLOBAL_S3_BUCKET: "stub"
-      ENABLE_IMAGE_TRANSFORMATION: "true"
-      IMGPROXY_URL: "http://apod-${site_domain}-imgproxy:5001"
-      S3_PROTOCOL_ACCESS_KEY_ID: "${s3_access_key_id}"
-      S3_PROTOCOL_ACCESS_KEY_SECRET: "${s3_access_key_secret}"
-
-  imgproxy:
-    image: "darthsim/imgproxy:v3.30.1"
-    volumes:
-      - "${data_root}/storage:/var/lib/storage"
-    environment:
-      IMGPROXY_BIND: ":5001"
-      IMGPROXY_LOCAL_FILESYSTEM_ROOT: "/"
-      IMGPROXY_USE_ETAG: "true"
-
-  meta:
-    image: "supabase/postgres-meta:v0.96.3"
-    environment:
-      PG_META_PORT: "8080"
-      PG_META_DB_HOST: "apod-${site_domain}-db"
-      PG_META_DB_PORT: "5432"
-      PG_META_DB_NAME: "postgres"
-      PG_META_DB_USER: "supabase_admin"
-      PG_META_DB_PASSWORD: "${site_db_pass}"
-      CRYPTO_KEY: "${pg_meta_crypto_key}"
-
-  studio:
-    image: "supabase/studio:2026.04.08-sha-205cbe7"
-    environment:
-      HOSTNAME: "0.0.0.0"
-      STUDIO_PG_META_URL: "http://apod-${site_domain}-meta:8080"
-      SUPABASE_URL: "http://apod-${site_domain}-kong:8000"
-      SUPABASE_PUBLIC_URL: "https://${site_domain}"
-      SUPABASE_ANON_KEY: "${anon_key}"
-      SUPABASE_SERVICE_KEY: "${service_role_key}"
-      AUTH_JWT_SECRET: "${jwt_secret}"
-      POSTGRES_PASSWORD: "${site_db_pass}"
-      NEXT_PUBLIC_ENABLE_LOGS: "false"
-      NEXT_ANALYTICS_BACKEND_PROVIDER: "postgres"
-
-files:
-  - path: "${data_root}/kong/kong.yml"
-    content: |
-      _format_version: "2.1"
-      _transform: true
-
-      consumers:
-        - username: anon
-          keyauth_credentials:
-            - key: ${anon_key}
-        - username: service_role
-          keyauth_credentials:
-            - key: ${service_role_key}
-
-      - username: DASHBOARD
-        basicauth_credentials:
-          - username: ${dashboard_username}
-            password: ${dashboard_password}
-
-      acls:
-        - consumer: anon
-          group: anon
-        - consumer: service_role
-          group: admin
-
-      services:
-        - name: auth-v1-open
-          url: http://apod-${site_domain}-auth:9999/verify
-          routes:
-            - name: auth-v1-open
-              strip_path: true
-              paths:
-                - /auth/v1/verify
-          plugins:
-            - name: cors
-
-        - name: auth-v1-open-callback
-          url: http://apod-${site_domain}-auth:9999/callback
-          routes:
-            - name: auth-v1-open-callback
-              strip_path: true
-              paths:
-                - /auth/v1/callback
-          plugins:
-            - name: cors
-
-        - name: auth-v1-open-authorize
-          url: http://apod-${site_domain}-auth:9999/authorize
-          routes:
-            - name: auth-v1-open-authorize
-              strip_path: true
-              paths:
-                - /auth/v1/authorize
-          plugins:
-            - name: cors
-
-        - name: auth-v1
-          url: http://apod-${site_domain}-auth:9999
-          routes:
-            - name: auth-v1
-              strip_path: true
-              paths:
-                - /auth/v1/
-          plugins:
-            - name: cors
-            - name: key-auth
-              config:
-                hide_credentials: false
-            - name: acl
-              config:
-                hide_groups_header: true
-                allow:
-                  - admin
-                  - anon
-
-        - name: rest-v1
-          url: http://apod-${site_domain}-rest:3000
-          routes:
-            - name: rest-v1
-              strip_path: true
-              paths:
-                - /rest/v1/
-          plugins:
-            - name: cors
-            - name: key-auth
-              config:
-                hide_credentials: false
-            - name: acl
-              config:
-                hide_groups_header: true
-                allow:
-                  - admin
-                  - anon
-
-        - name: realtime-v1-ws
-          url: http://apod-${site_domain}-realtime:4000/socket
-          routes:
-            - name: realtime-v1-ws
-              strip_path: true
-              paths:
-                - /realtime/v1/
-              protocols:
-                - http
-                - https
-                - ws
-                - wss
-          plugins:
-            - name: cors
-            - name: key-auth
-              config:
-                hide_credentials: false
-            - name: acl
-              config:
-                hide_groups_header: true
-                allow:
-                  - admin
-                  - anon
-
-        - name: storage-v1
-          url: http://apod-${site_domain}-storage:5000
-          routes:
-            - name: storage-v1
-              strip_path: true
-              paths:
-                - /storage/v1/
-          plugins:
-            - name: cors
-
-        - name: meta
-          url: http://apod-${site_domain}-meta:8080
-          routes:
-            - name: meta
-              strip_path: true
-              paths:
-                - /pg/
-          plugins:
-            - name: key-auth
-              config:
-                hide_credentials: false
-            - name: acl
-              config:
-                hide_groups_header: true
-                allow:
-                  - admin
-
-        - name: studio
-          url: http://apod-${site_domain}-studio:3000
-          routes:
-            - name: studio
-              strip_path: true
-              paths:
-                - /
-          plugins:
-            - name: cors
-            - name: basic-auth
-              config:
-                hide_credentials: true
-
-  - path: "${data_root}/init/99-supabase-init.sql"
-    content: |
-      -- Supabase roles and schemas (idempotent)
-      DO $$ BEGIN CREATE ROLE supabase_auth_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${site_db_pass}'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-      DO $$ BEGIN CREATE ROLE supabase_storage_admin NOINHERIT CREATEROLE LOGIN PASSWORD '${site_db_pass}'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-      ALTER ROLE supabase_auth_admin WITH PASSWORD '${site_db_pass}';
-      ALTER ROLE supabase_storage_admin WITH PASSWORD '${site_db_pass}';
-      ALTER ROLE authenticator WITH PASSWORD '${site_db_pass}';
-      ALTER ROLE supabase_realtime_admin WITH PASSWORD '${site_db_pass}';
-      GRANT anon TO authenticator;
-      GRANT authenticated TO authenticator;
-      GRANT service_role TO authenticator;
-      GRANT supabase_admin TO authenticator;
-      CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
-      CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin;
-      GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
-      GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
-      GRANT ALL ON SCHEMA storage TO supabase_storage_admin;
-      GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
-      GRANT ALL ON SCHEMA _realtime TO supabase_realtime_admin;
-      GRANT ALL ON SCHEMA public TO supabase_auth_admin, supabase_storage_admin;
-      GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-      GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
-      GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
-      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
-      CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
-      CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
-      CREATE EXTENSION IF NOT EXISTS pgjwt SCHEMA extensions;
-
-healthcheck:
-  url: "http://localhost:8000"
-  interval: 30s
-  timeout: 15s
-  retries: 10
 
 backup:
-  paths:
-    - "${data_root}/storage"
   databases:
     - type: postgres
       service: db
-
-setup:
-  - name: "Wait for PostgreSQL"
-    command: "until pg_isready -h localhost -U supabase_admin; do sleep 2; done && sleep 3"
-    service: db
-  - name: "Initialize Supabase roles and schemas"
-    command: "psql -h localhost -U supabase_admin -d postgres -f /docker-entrypoint-initdb.d/99-supabase-init.sql"
-    service: db

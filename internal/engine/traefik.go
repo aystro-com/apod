@@ -38,6 +38,8 @@ func traefikCommand(email string) []string {
 		"--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json",
 		"--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web",
 		"--serversTransport.insecureSkipVerify=true",
+		"--providers.file.directory=/etc/traefik/dynamic",
+		"--providers.file.watch=true",
 	}
 }
 
@@ -68,8 +70,9 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 			"apod.role":    "proxy",
 		},
 		Volumes: map[string]string{
-			"/var/run/docker.sock": "/var/run/docker.sock",
-			"apod-letsencrypt":     "/letsencrypt",
+			"/var/run/docker.sock":          "/var/run/docker.sock",
+			"apod-letsencrypt":              "/letsencrypt",
+			"/etc/apod/traefik/dynamic":     "/etc/traefik/dynamic:ro",
 		},
 		Ports: map[string]string{
 			"80":  "80",

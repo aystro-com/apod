@@ -234,6 +234,22 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		}
 	}
 
+	// Compose-based drivers delegate to docker compose
+	if driver.Type == "compose" && driver.Compose != nil {
+		if err := e.traefik.EnsureRunning(ctx); err != nil {
+			return fmt.Errorf("ensure traefik: %w", err)
+		}
+		if err := e.CreateComposeSite(ctx, opts, driver, vars); err != nil {
+			e.db.UpdateSiteStatus(opts.Domain, "error")
+			return fmt.Errorf("compose site: %w", err)
+		}
+		e.db.UpdateSiteStatus(opts.Domain, "running")
+		if createdSite, err := e.db.GetSite(opts.Domain); err == nil {
+			e.db.AddDomain(createdSite.ID, opts.Domain, true)
+		}
+		return nil
+	}
+
 	if err := e.traefik.EnsureRunning(ctx); err != nil {
 		return fmt.Errorf("ensure traefik: %w", err)
 	}
@@ -379,6 +395,21 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	}
 	defer e.locks.Release(domain)
 
+	// Check if this is a compose site
+	site, _ := e.db.GetSite(domain)
+	if site != nil {
+		driver, _ := e.drivers.Load(site.Driver)
+		if driver != nil && driver.Type == "compose" {
+			e.DestroyComposeSite(ctx, domain, site.Owner)
+			e.db.DeleteSite(domain)
+			if purge {
+				siteRoot, _ := e.SiteDir(site.Owner, domain)
+				os.RemoveAll(filepath.Dir(siteRoot))
+			}
+			return nil
+		}
+	}
+
 	ids, err := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
@@ -415,6 +446,17 @@ func (e *Engine) StartSite(ctx context.Context, domain string) error {
 	}
 	defer e.locks.Release(domain)
 
+	site, _ := e.db.GetSite(domain)
+	if site != nil {
+		driver, _ := e.drivers.Load(site.Driver)
+		if driver != nil && driver.Type == "compose" {
+			if err := e.StartComposeSite(ctx, domain, site.Owner); err != nil {
+				return err
+			}
+			return e.db.UpdateSiteStatus(domain, "running")
+		}
+	}
+
 	ids, err := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
@@ -434,6 +476,17 @@ func (e *Engine) StopSite(ctx context.Context, domain string) error {
 		return err
 	}
 	defer e.locks.Release(domain)
+
+	site, _ := e.db.GetSite(domain)
+	if site != nil {
+		driver, _ := e.drivers.Load(site.Driver)
+		if driver != nil && driver.Type == "compose" {
+			if err := e.StopComposeSite(ctx, domain, site.Owner); err != nil {
+				return err
+			}
+			return e.db.UpdateSiteStatus(domain, "stopped")
+		}
+	}
 
 	ids, err := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	if err != nil {
