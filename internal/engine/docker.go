@@ -131,7 +131,7 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 			Resources:     resources,
 			RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 			PortBindings:  portBindings,
-			SecurityOpt:   []string{"no-new-privileges:true"},
+			SecurityOpt:   containerSecurityOpt(cfg.Image),
 			CapDrop:       []string{"ALL"},
 			CapAdd:        []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE"},
 		},
@@ -238,4 +238,17 @@ func (d *Docker) ExecInContainerAs(ctx context.Context, containerID string, cmd 
 	}
 
 	return string(output), nil
+}
+
+// containerSecurityOpt returns security options for a container.
+// Database images (mysql, postgres, mongo, mariadb) need gosu/su to switch users,
+// which is incompatible with no-new-privileges.
+func containerSecurityOpt(image string) []string {
+	lower := strings.ToLower(image)
+	for _, db := range []string{"mysql", "mariadb", "postgres", "mongo", "redis"} {
+		if strings.Contains(lower, db) {
+			return nil // no security opts for database containers
+		}
+	}
+	return []string{"no-new-privileges:true"}
 }
