@@ -25,6 +25,25 @@ if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
 
+/**
+ * Get the domain for a service — checks custom field "Domain" first, then falls back to $params['domain']
+ */
+function apod_getDomain(array $params): string
+{
+    // Check custom fields first
+    $customfields = $params['customfields'] ?? [];
+    if (!empty($customfields['Domain'])) {
+        return $customfields['Domain'];
+    }
+
+    // Fall back to WHMCS domain field
+    if (!empty($params['domain'])) {
+        return $params['domain'];
+    }
+
+    return '';
+}
+
 function apod_MetaData()
 {
     return [
@@ -77,7 +96,7 @@ function apod_ConfigOptions()
 
 function apod_CreateAccount(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -95,12 +114,19 @@ function apod_CreateAccount(array $params)
         return $response['error'];
     }
 
+    // Store domain in WHMCS service record
+    try {
+        \WHMCS\Database\Capsule::table('tblhosting')
+            ->where('id', $params['serviceid'])
+            ->update(['domain' => $domain]);
+    } catch (\Exception $e) {}
+
     return 'success';
 }
 
 function apod_SuspendAccount(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -116,7 +142,7 @@ function apod_SuspendAccount(array $params)
 
 function apod_UnsuspendAccount(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -132,7 +158,7 @@ function apod_UnsuspendAccount(array $params)
 
 function apod_TerminateAccount(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -150,7 +176,7 @@ function apod_TerminateAccount(array $params)
  */
 function apod_ClientArea(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return '';
     }
@@ -243,7 +269,7 @@ function apod_ClientAreaCustomButtonArray(array $params = [])
 
 function apod_openTerminal(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -265,7 +291,7 @@ function apod_openTerminal(array $params)
 
 function apod_restart(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -280,7 +306,7 @@ function apod_restart(array $params)
 
 function apod_createBackup(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -300,7 +326,7 @@ function apod_createBackup(array $params)
 
 function apod_restoreBackup(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return 'Domain is required';
     }
@@ -348,7 +374,7 @@ function apod_AdminCustomButtonArray()
  */
 function apod_AdminServicesTabFields(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     if (empty($domain)) {
         return [];
     }
@@ -378,7 +404,7 @@ function apod_AdminServicesTabFields(array $params)
  */
 function apod_ServiceSingleSignOn(array $params)
 {
-    $domain = $params['domain'];
+    $domain = apod_getDomain($params);
     return ['success' => true, 'redirectTo' => 'https://' . $domain];
 }
 
