@@ -94,7 +94,25 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site, _ := h.engine.GetSite(r.Context(), req.Domain)
-	respondJSON(w, http.StatusCreated, site)
+	creds, _ := h.engine.GetSiteCredentials(r.Context(), req.Domain)
+
+	result := map[string]interface{}{
+		"site": site,
+	}
+	if creds != nil && len(creds.Secrets) > 0 {
+		result["credentials"] = creds
+	}
+	respondJSON(w, http.StatusCreated, result)
+}
+
+func (h *Handler) SiteInfo(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	creds, err := h.engine.GetSiteCredentials(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, creds)
 }
 
 func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {

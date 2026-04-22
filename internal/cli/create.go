@@ -40,9 +40,25 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("create site: %w", err)
 		}
 
-		var site map[string]interface{}
-		json.Unmarshal(resp.Data, &site)
+		var result struct {
+			Site        map[string]interface{} `json:"site"`
+			Credentials *struct {
+				URL     string            `json:"url"`
+				Secrets map[string]string `json:"secrets"`
+			} `json:"credentials"`
+		}
+		json.Unmarshal(resp.Data, &result)
 		fmt.Printf("Site %s created successfully\n", domain)
+
+		// Show credentials if available
+		if result.Credentials != nil && len(result.Credentials.Secrets) > 0 {
+			fmt.Printf("\n  URL: %s\n", result.Credentials.URL)
+			fmt.Println("  Credentials:")
+			for k, v := range result.Credentials.Secrets {
+				fmt.Printf("    %s = %s\n", k, v)
+			}
+			fmt.Println()
+		}
 
 		// Auto-deploy if --deploy flag or repo was provided
 		if flagDeploy || flagRepo != "" {
