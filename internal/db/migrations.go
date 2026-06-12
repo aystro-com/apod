@@ -162,6 +162,20 @@ var migrations = []struct {
 		expires_at DATETIME NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`},
+	{23, `CREATE TABLE IF NOT EXISTS api_tokens (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_name TEXT NOT NULL,
+		name TEXT NOT NULL,
+		token_hash TEXT NOT NULL UNIQUE,
+		abilities TEXT NOT NULL DEFAULT 'read',
+		sensitive INTEGER NOT NULL DEFAULT 0,
+		expires_at DATETIME,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`},
+	{24, `ALTER TABLE users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''`},
+	{25, `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`},
+	{26, `ALTER TABLE users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0`},
+	{27, `ALTER TABLE users ADD COLUMN recovery_codes TEXT NOT NULL DEFAULT '[]'`},
 }
 
 func (d *DB) migrate() error {

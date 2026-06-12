@@ -14,8 +14,9 @@ import (
 type contextKey string
 
 const (
-	ctxUserKey       contextKey = "user"
-	ctxIsUnixSocket  contextKey = "unix_socket"
+	ctxUserKey      contextKey = "user"
+	ctxIsUnixSocket contextKey = "unix_socket"
+	ctxTokenKey     contextKey = "token_info"
 )
 
 func LoggingMiddleware(next http.Handler) http.Handler {
@@ -71,17 +72,26 @@ func AuthMiddleware(eng *engine.Engine) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Session tokens (web UI logins) and API keys share the Bearer
-			// scheme; the prefix routes them to the right validator.
+			// Three Bearer credential kinds share the same scheme, routed by
+			// prefix: session tokens (web UI), scoped PATs (apod_pat_), and
+			// long-lived API keys. Only PATs carry ability restrictions.
 			var user *models.User
+			var tokenInfo *engine.TokenInfo
 			var err error
-			if engine.IsSessionToken(key) {
+			switch {
+			case engine.IsSessionToken(key):
 				user, err = eng.ValidateSessionToken(key)
 				if err != nil || user == nil {
 					respondError(w, http.StatusUnauthorized, "invalid or expired session")
 					return
 				}
-			} else {
+			case engine.IsAPIToken(key):
+				user, tokenInfo, err = eng.ValidateAPIToken(key)
+				if err != nil || user == nil || tokenInfo == nil {
+					respondError(w, http.StatusUnauthorized, "invalid or expired token")
+					return
+				}
+			default:
 				user, err = eng.GetUserByAPIKeyHash(engine.HashAPIKey(key))
 				if err != nil || user == nil {
 					respondError(w, http.StatusUnauthorized, "invalid API key")
@@ -90,6 +100,9 @@ func AuthMiddleware(eng *engine.Engine) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), ctxUserKey, user)
+			if tokenInfo != nil {
+				ctx = context.WithValue(ctx, ctxTokenKey, tokenInfo)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

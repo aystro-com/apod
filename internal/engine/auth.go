@@ -22,6 +22,11 @@ const (
 // without a password, and wrong passwords — no username enumeration.
 var errInvalidCredentials = fmt.Errorf("invalid username or password")
 
+// ErrTwoFactorRequired signals that the password was correct but a valid 2FA
+// code (or recovery code) must also be supplied. The "2fa_required" marker is
+// matched by the HTTP layer and the UI.
+var ErrTwoFactorRequired = fmt.Errorf("2fa_required: two-factor code required")
+
 // IsSessionToken reports whether a bearer token is a login session token
 // (as opposed to a long-lived API key).
 func IsSessionToken(token string) bool {
@@ -54,9 +59,10 @@ func (e *Engine) SetUserPassword(name, password string) error {
 	return nil
 }
 
-// LoginWithPassword verifies a username/password pair and creates a session.
-// It returns the raw session token (shown to the client once) and the user.
-func (e *Engine) LoginWithPassword(name, password string) (string, *models.User, error) {
+// LoginWithPassword verifies a username/password pair (and a 2FA code, if the
+// user has 2FA enabled) and creates a session. It returns the raw session
+// token (shown to the client once) and the user.
+func (e *Engine) LoginWithPassword(name, password, code string) (string, *models.User, error) {
 	hash, err := e.db.GetUserPasswordHash(name)
 	if err != nil || hash == "" {
 		// Burn comparable time for unknown users / users without a password
@@ -74,6 +80,16 @@ func (e *Engine) LoginWithPassword(name, password string) (string, *models.User,
 	user, err := e.db.GetUserByName(name)
 	if err != nil {
 		return "", nil, errInvalidCredentials
+	}
+
+	// Second factor, when enabled.
+	if secret, enabled, _ := e.db.GetUserTOTP(name); enabled {
+		if code == "" {
+			return "", nil, ErrTwoFactorRequired
+		}
+		if !e.consumeSecondFactor(name, secret, code) {
+			return "", nil, errInvalidCredentials
+		}
 	}
 
 	tokenBytes := make([]byte, 32)

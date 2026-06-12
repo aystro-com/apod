@@ -98,3 +98,9 @@ func (c *Client) Post(path string, body interface{}) (*apiResponse, error) {
 func (c *Client) Delete(path string) (*apiResponse, error) {
 	return c.do("DELETE", path, nil)
 }
+
+// Delete2 sends a DELETE with a JSON body, for endpoints that identify the
+// target in the payload (e.g. token revocation).
+func (c *Client) Delete2(path string, body interface{}) (*apiResponse, error) {
+	return c.do("DELETE", path, body)
+}

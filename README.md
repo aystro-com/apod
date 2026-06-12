@@ -682,6 +682,60 @@ are bcrypt-hashed, login errors never reveal whether a username exists, and
 all of a user's sessions are revoked on password change, API key reset, and
 user deletion.
 
+### Two-Factor Authentication (TOTP)
+
+Users with a password can enable TOTP 2FA (RFC 6238, compatible with any
+authenticator app). Enrollment returns a secret + otpauth URI; confirming with
+a valid code enables enforcement and returns 8 one-time recovery codes.
+
+| Method | Endpoint | Description | Body |
+|--------|----------|-------------|------|
+| `POST` | `/api/v1/auth/2fa/setup` | Begin enrollment, returns secret + otpauth URI | |
+| `POST` | `/api/v1/auth/2fa/enable` | Confirm and enable, returns recovery codes | `{"code"}` |
+| `POST` | `/api/v1/auth/2fa/disable` | Disable after verifying a code | `{"code"}` |
+
+When 2FA is on, `POST /auth/login` requires a `code` field (a TOTP or recovery
+code). Without it the server replies `401 2fa_required`. TOTP codes are
+single-use (replay-protected by step), recovery codes are burned on use, and
+codes are checked in constant time within a ±1 step window.
+
+### Scoped API Tokens (Personal Access Tokens)
+
+Beyond all-or-nothing API keys, users can mint **scoped tokens** (`apod_pat_…`)
+with a limited set of abilities — ideal for CI and billing integrations.
+
+| Method | Endpoint | Description | Body |
+|--------|----------|-------------|------|
+| `POST` | `/api/v1/tokens` | Create a scoped token (returned once) | `{"name", "abilities":["read","write","deploy"], "sensitive":false, "ttl_days":0}` |
+| `GET` | `/api/v1/tokens` | List your tokens (metadata only) | |
+| `DELETE` | `/api/v1/tokens` | Revoke a token | `{"id"}` |
+
+Token security model:
+- **Abilities**: `read` (GET), `write` (mutations), `deploy` (deploy/rollback/
+  start/stop/restart only). A token holds a subset; missing abilities → `403`.
+- **Sensitive flag**: secret-bearing endpoints (env values, DB credentials,
+  webhook tokens, FTP) require a token explicitly marked `sensitive`.
+- **No escalation**: scoped tokens can **never** manage users, passwords, 2FA,
+  or other tokens — those require a session or full API key.
+- Tokens are stored SHA-256-hashed, support optional expiry, and are revoked
+  in bulk on API key reset or user deletion.
+
+CLI: `apod token create ci --abilities read,deploy`, `apod token list`,
+`apod token revoke <id>`.
+
+### First-run setup
+
+A fresh instance (no users) exposes a one-time setup path so the first admin
+can be created from the web UI instead of the CLI:
+
+| Method | Endpoint | Description | Body |
+|--------|----------|-------------|------|
+| `GET` | `/api/v1/setup/status` | Whether the instance needs setup | |
+| `POST` | `/api/v1/setup` | Create the first admin (only while no users exist) | `{"name", "password"}` |
+
+`POST /setup` self-disables the moment any user exists (`403` afterward) and is
+tightly rate-limited.
+
 ### Response Format
 
 All responses follow this structure:

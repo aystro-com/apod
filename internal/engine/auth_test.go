@@ -43,7 +43,7 @@ func TestLoginWithPassword(t *testing.T) {
 		t.Fatalf("SetUserPassword: %v", err)
 	}
 
-	token, user, err := e.LoginWithPassword("alice", "correct-horse-battery")
+	token, user, err := e.LoginWithPassword("alice", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatalf("LoginWithPassword: %v", err)
 	}
@@ -59,11 +59,11 @@ func TestLoginWithWrongPassword(t *testing.T) {
 	e := newAuthTestEngine(t)
 	e.SetUserPassword("alice", "correct-horse-battery")
 
-	_, _, err := e.LoginWithPassword("alice", "wrong-password")
+	_, _, err := e.LoginWithPassword("alice", "wrong-password", "")
 	if err == nil {
 		t.Fatal("expected error for wrong password")
 	}
-	_, _, err2 := e.LoginWithPassword("ghost", "whatever-password")
+	_, _, err2 := e.LoginWithPassword("ghost", "whatever-password", "")
 	if err2 == nil {
 		t.Fatal("expected error for unknown user")
 	}
@@ -75,7 +75,7 @@ func TestLoginWithWrongPassword(t *testing.T) {
 
 func TestLoginWithoutPasswordSet(t *testing.T) {
 	e := newAuthTestEngine(t)
-	if _, _, err := e.LoginWithPassword("alice", "anything-at-all"); err == nil {
+	if _, _, err := e.LoginWithPassword("alice", "anything-at-all", ""); err == nil {
 		t.Error("expected error when no password is set")
 	}
 }
@@ -83,7 +83,7 @@ func TestLoginWithoutPasswordSet(t *testing.T) {
 func TestValidateSessionToken(t *testing.T) {
 	e := newAuthTestEngine(t)
 	e.SetUserPassword("alice", "correct-horse-battery")
-	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery")
+	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery", "")
 
 	user, err := e.ValidateSessionToken(token)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestValidateSessionToken(t *testing.T) {
 func TestLogout(t *testing.T) {
 	e := newAuthTestEngine(t)
 	e.SetUserPassword("alice", "correct-horse-battery")
-	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery")
+	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery", "")
 
 	if err := e.Logout(token); err != nil {
 		t.Fatalf("Logout: %v", err)
@@ -114,7 +114,7 @@ func TestLogout(t *testing.T) {
 func TestPasswordChangeRevokesSessions(t *testing.T) {
 	e := newAuthTestEngine(t)
 	e.SetUserPassword("alice", "correct-horse-battery")
-	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery")
+	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery", "")
 
 	if err := e.SetUserPassword("alice", "brand-new-password1"); err != nil {
 		t.Fatalf("SetUserPassword: %v", err)
@@ -127,7 +127,7 @@ func TestPasswordChangeRevokesSessions(t *testing.T) {
 func TestResetAPIKeyRevokesSessions(t *testing.T) {
 	e := newAuthTestEngine(t)
 	e.SetUserPassword("alice", "correct-horse-battery")
-	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery")
+	token, _, _ := e.LoginWithPassword("alice", "correct-horse-battery", "")
 
 	if _, err := e.ResetAPIKey(t.Context(), "alice"); err != nil {
 		t.Fatalf("ResetAPIKey: %v", err)

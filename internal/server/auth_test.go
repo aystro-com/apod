@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,10 @@ func doJSON(t *testing.T, s *Server, method, path, bearer string, body string) (
 		Data  map[string]json.RawMessage `json:"data"`
 		Error string                     `json:"error"`
 	}
-	json.NewDecoder(w.Body).Decode(&envelope)
+	raw := w.Body.Bytes()
+	json.Unmarshal(raw, &envelope)
+	// Restore the body so callers can still inspect w.Body.String().
+	w.Body = bytes.NewBuffer(raw)
 	return w, envelope.Data
 }
 
