@@ -154,6 +154,14 @@ var migrations = []struct {
 	)`},
 	{19, `ALTER TABLE sites ADD COLUMN owner TEXT NOT NULL DEFAULT ''`},
 	{20, `ALTER TABLE sites ADD COLUMN storage TEXT NOT NULL DEFAULT '0'`},
+	{21, `ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''`},
+	{22, `CREATE TABLE IF NOT EXISTS sessions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		token_hash TEXT NOT NULL UNIQUE,
+		user_name TEXT NOT NULL,
+		expires_at DATETIME NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`},
 }
 
 func (d *DB) migrate() error {

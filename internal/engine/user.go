@@ -107,7 +107,8 @@ func (e *Engine) DeleteUser(ctx context.Context, name string) error {
 	cmd := exec.CommandContext(ctx, "userdel", "--remove", "--force", name)
 	cmd.Run() // Best effort — user may not exist on this system
 
-	// Delete from database
+	// Delete from database (and any active sessions)
+	e.db.DeleteSessionsForUser(name)
 	if err := e.db.DeleteUser(name); err != nil {
 		return err
 	}
@@ -132,6 +133,9 @@ func (e *Engine) ResetAPIKey(ctx context.Context, name string) (string, error) {
 	if err := e.db.UpdateUserAPIKeyHash(name, keyHash); err != nil {
 		return "", err
 	}
+
+	// A compromised key may mean compromised sessions — revoke them too.
+	e.db.DeleteSessionsForUser(name)
 
 	e.LogActivity("server", "user_reset_key", fmt.Sprintf("reset API key for %s", name), "success")
 	return rawKey, nil

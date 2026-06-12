@@ -48,7 +48,7 @@ func (d *DB) GetUserByAPIKeyHash(hash string) (*models.User, error) {
 
 func (d *DB) ListUsers() ([]models.User, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, name, uid, role, created_at FROM users ORDER BY name`,
+		`SELECT id, name, uid, role, password_hash != '', created_at FROM users ORDER BY name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query users: %w", err)
@@ -58,12 +58,40 @@ func (d *DB) ListUsers() ([]models.User, error) {
 	var users []models.User
 	for rows.Next() {
 		var u models.User
-		if err := rows.Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.HasPassword, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		users = append(users, u)
 	}
 	return users, nil
+}
+
+func (d *DB) SetUserPasswordHash(name, hash string) error {
+	result, err := d.conn.Exec(
+		`UPDATE users SET password_hash = ? WHERE name = ?`, hash, name,
+	)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user %q not found", name)
+	}
+	return nil
+}
+
+func (d *DB) GetUserPasswordHash(name string) (string, error) {
+	var hash string
+	err := d.conn.QueryRow(
+		`SELECT password_hash FROM users WHERE name = ?`, name,
+	).Scan(&hash)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("user %q not found", name)
+	}
+	if err != nil {
+		return "", fmt.Errorf("query password hash: %w", err)
+	}
+	return hash, nil
 }
 
 func (d *DB) DeleteUser(name string) error {

@@ -603,6 +603,7 @@ apod user create <name> [--role user|admin]  # Creates Linux user + API key
 apod user list                               # List all users
 apod user delete <name>                      # Remove user (must have no sites)
 apod user reset-key <name>                   # Generate new API key
+apod user passwd <name> --password <pass>    # Set web UI login password (min 8 chars)
 apod transfer <domain> <new-owner>           # Transfer site to another user
 apod transfer <domain> ""                    # Unassign site (admin-owned)
 ```
@@ -659,6 +660,27 @@ Every CLI command maps to an API endpoint. The API listens on a Unix socket (`/v
 ```
 Authorization: Bearer <api-key>
 ```
+
+Session tokens (from password login, below) use the same header. API keys are
+long-lived; session tokens expire after 24 hours.
+
+### Sessions (password login)
+
+Users with a password (set via `apod user passwd <name>`) can exchange it for
+a short-lived session token — this is what the web UI uses, so API keys never
+have to be stored in a browser.
+
+| Method | Endpoint | Description | Body |
+|--------|----------|-------------|------|
+| `POST` | `/api/v1/auth/login` | Exchange password for session token (rate-limited to 10/min/IP) | `{"name", "password"}` |
+| `GET` | `/api/v1/auth/me` | Current identity (works with keys and session tokens) | |
+| `POST` | `/api/v1/auth/logout` | Revoke the current session token | |
+| `POST` | `/api/v1/users/{name}/password` | Set login password (admin: anyone, user: self) | `{"password"}` (min 8 chars) |
+
+Session security: tokens are 32 random bytes stored SHA-256-hashed, passwords
+are bcrypt-hashed, login errors never reveal whether a username exists, and
+all of a user's sessions are revoked on password change, API key reset, and
+user deletion.
 
 ### Response Format
 

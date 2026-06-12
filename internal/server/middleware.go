@@ -71,11 +71,22 @@ func AuthMiddleware(eng *engine.Engine) func(http.Handler) http.Handler {
 				return
 			}
 
-			hash := engine.HashAPIKey(key)
-			user, err := eng.GetUserByAPIKeyHash(hash)
-			if err != nil || user == nil {
-				respondError(w, http.StatusUnauthorized, "invalid API key")
-				return
+			// Session tokens (web UI logins) and API keys share the Bearer
+			// scheme; the prefix routes them to the right validator.
+			var user *models.User
+			var err error
+			if engine.IsSessionToken(key) {
+				user, err = eng.ValidateSessionToken(key)
+				if err != nil || user == nil {
+					respondError(w, http.StatusUnauthorized, "invalid or expired session")
+					return
+				}
+			} else {
+				user, err = eng.GetUserByAPIKeyHash(engine.HashAPIKey(key))
+				if err != nil || user == nil {
+					respondError(w, http.StatusUnauthorized, "invalid API key")
+					return
+				}
 			}
 
 			ctx := context.WithValue(r.Context(), ctxUserKey, user)

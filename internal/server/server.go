@@ -29,8 +29,20 @@ func New(e *engine.Engine) *Server {
 	r.Use(LoggingMiddleware)
 	r.Use(RateLimitMiddleware(60, 1*time.Minute)) // 60 requests per minute per IP
 
+	// Login is unauthenticated by design and gets a tighter rate limit to
+	// slow down password brute-forcing (bcrypt also makes attempts costly).
+	r.With(RateLimitMiddleware(10, 1*time.Minute)).
+		Post("/api/v1/auth/login", h.AuthLoginHandler)
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(AuthMiddleware(e))
+
+		// Session / identity
+		r.Get("/auth/me", h.AuthMeHandler)
+		r.Post("/auth/logout", h.AuthLogoutHandler)
+
+		// Password management (admin: anyone, user: self only)
+		r.Post("/users/{name}/password", h.SetUserPasswordHandler)
 
 		r.Post("/sites", h.CreateSite)
 		r.Get("/sites", h.ListSites)
