@@ -41,6 +41,11 @@ func (d *Docker) Ping(ctx context.Context) error {
 func (d *Docker) PullImage(ctx context.Context, ref string) error {
 	reader, err := d.cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
+		// Pull failed — fall back to a locally-present image if there is one
+		// (air-gapped hosts, pre-loaded or locally-built images).
+		if _, inspErr := d.cli.ImageInspect(ctx, ref); inspErr == nil {
+			return nil
+		}
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	defer reader.Close()

@@ -1,0 +1,23 @@
+name: apod-ui
+version: "1.0"
+description: apod web UI — the admin panel, served on its own domain
+
+parameters: {}
+
+services:
+  app:
+    image: "ghcr.io/montaserz/apod-ui:latest"
+    ports:
+      - "80"
+    volumes:
+      # The apod daemon control socket, bind-mounted read-only so the container
+      # can reverse-proxy /api and /webhook to it (same-origin, no CORS).
+      - "/var/run/apod.sock:/var/run/apod.sock:ro"
+
+healthcheck:
+  url: "http://localhost:80"
+  interval: 10s
+  timeout: 5s
+  retries: 3
+
+setup: []
