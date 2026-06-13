@@ -1,6 +1,12 @@
+<div align="center">
+
+<img src="docs/apod.svg" alt="apod" width="72" height="72" />
+
 # apod
 
 A single binary that turns any VPS into a hosting platform. Deploy sites, manage domains, handle SSL — all through Docker containers without the overhead of traditional panels.
+
+</div>
 
 ## Why apod?
 
@@ -21,14 +27,35 @@ Hosting panels are bloated. PaaS platforms are expensive. Kubernetes is overkill
 - **SaaS-ify anything** — turn any Docker app into a managed service in minutes
 - **Web terminal** — secure token-based container shell access via billing panel
 
+## Web UI
+
+A full web admin panel ships as a driver — manage sites, deploys, domains, backups, users, and 2FA from the browser. Install it on its own domain in one command:
+
+```bash
+apod create panel.example.com --driver apod-ui
+```
+
+<div align="center">
+  <img src="docs/apod-ui.png" alt="apod web UI" width="640" />
+</div>
+
+The panel is served by Traefik with automatic SSL and talks to the daemon over its local socket — same-origin, no CORS, nothing extra to configure. Source: [aystro-com/apod-ui](https://github.com/aystro-com/apod-ui).
+
+## Requirements
+
+- A Linux server with **root** access (Ubuntu/Debian recommended)
+- **[Docker](https://docs.docker.com/engine/install/)** — the install script can set this up for you
+- **systemd** — runs the managed `apod` daemon
+- Ports **80** and **443** free for Traefik (automatic SSL); **8443** as well if you use the remote API
+- A **domain pointing at the server** for any site that needs SSL (including the web UI)
+- Optional: `quota` tools, for kernel-enforced disk quotas
+
 ## Quick Start
 
 ```bash
-# Install
+# Install + guided setup (SSL email, system service, drivers, optional web UI)
 curl -fsSL https://raw.githubusercontent.com/aystro-com/apod/master/install.sh | sh
-
-# Initialize (sets up systemd, SSL email, drivers)
-apod init
+# (the installer runs `apod init` for you; run it again any time to re-configure)
 
 # Create a PHP site with resource limits
 apod create mysite.com --driver php --ram 512M --cpu 1 --storage 5G

@@ -78,19 +78,18 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 echo ""
-echo "Done! Start the server:"
-echo "  apod server --acme-email you@example.com"
-echo ""
-echo "Or set up as a service:"
-echo "  cat > /etc/systemd/system/apod.service << 'EOF'"
-echo "  [Unit]"
-echo "  Description=apod server"
-echo "  After=docker.service"
-echo "  Requires=docker.service"
-echo "  [Service]"
-echo "  ExecStart=/usr/local/bin/apod server --acme-email you@example.com"
-echo "  Restart=always"
-echo "  [Install]"
-echo "  WantedBy=multi-user.target"
-echo "  EOF"
-echo "  systemctl enable --now apod"
+echo "apod ${LATEST} installed."
+
+# Flow straight into setup. `apod init` is interactive, so read from the
+# terminal explicitly — when this script is run via `curl ... | sh`, stdin is
+# the piped script, not the TTY. Skip auto-init when Docker is missing or there
+# is no terminal (e.g. CI); the user can run `apod init` later.
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Install Docker (above), then finish setup with:  apod init"
+elif [ -r /dev/tty ]; then
+  echo "Finishing setup..."
+  echo ""
+  apod init < /dev/tty
+else
+  echo "Run 'apod init' to finish setup (SSL email, system service, optional web UI)."
+fi

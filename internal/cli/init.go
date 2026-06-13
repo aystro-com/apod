@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -101,6 +102,42 @@ WantedBy=multi-user.target
 		fmt.Println("  static    Static HTML with Nginx")
 		fmt.Println("  odoo      Odoo ERP with PostgreSQL")
 		fmt.Println("  unifi     UniFi Network Application with MongoDB")
+		fmt.Println("  apod-ui   Web admin panel for apod")
+
+		// Offer to install the web admin panel (apod-ui).
+		fmt.Println()
+		fmt.Print("Install the web admin panel now? It runs on its own domain. [y/N]: ")
+		uiAns, _ := reader.ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(uiAns)); a == "y" || a == "yes" {
+			fmt.Println("  The panel needs a domain whose DNS already points at this server (for SSL).")
+			fmt.Print("  Panel domain (e.g. panel.example.com): ")
+			uiDomain, _ := reader.ReadString('\n')
+			uiDomain = strings.TrimSpace(uiDomain)
+			if uiDomain == "" {
+				fmt.Println("  No domain entered — skipped. Install it later with:")
+				fmt.Println("    apod create <domain> --driver apod-ui")
+			} else {
+				fmt.Printf("  Installing apod-ui on %s ...\n", uiDomain)
+				// Give the freshly-started daemon a moment to open its socket.
+				for i := 0; i < 10; i++ {
+					if _, serr := os.Stat("/var/run/apod.sock"); serr == nil {
+						break
+					}
+					time.Sleep(time.Second)
+				}
+				c := exec.Command("apod", "create", uiDomain, "--driver", "apod-ui")
+				c.Stdout, c.Stderr = os.Stdout, os.Stderr
+				if err := c.Run(); err != nil {
+					fmt.Printf("  Could not install the panel (%v). Retry later with:\n", err)
+					fmt.Println("    apod create " + uiDomain + " --driver apod-ui")
+				} else {
+					fmt.Printf("  Panel installed → https://%s\n", uiDomain)
+				}
+			}
+		} else {
+			fmt.Println("  Skipped. You can install the web UI any time (you'll need a domain):")
+			fmt.Println("    apod create <domain> --driver apod-ui")
+		}
 
 		return nil
 	},
