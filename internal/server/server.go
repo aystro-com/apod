@@ -29,8 +29,39 @@ func New(e *engine.Engine) *Server {
 	r.Use(LoggingMiddleware)
 	r.Use(RateLimitMiddleware(60, 1*time.Minute)) // 60 requests per minute per IP
 
+	// Unauthenticated, first-run only. Tight rate limit on both.
+	r.With(RateLimitMiddleware(10, 1*time.Minute)).
+		Get("/api/v1/setup/status", h.SetupStatusHandler)
+	r.With(RateLimitMiddleware(5, 1*time.Minute)).
+		Post("/api/v1/setup", h.SetupHandler)
+
+	// Login is unauthenticated by design and gets a tighter rate limit to
+	// slow down password brute-forcing (bcrypt also makes attempts costly).
+	r.With(RateLimitMiddleware(10, 1*time.Minute)).
+		Post("/api/v1/auth/login", h.AuthLoginHandler)
+
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(AuthMiddleware(e))
+		// Enforce scoped-token (PAT) abilities for everything below. Full
+		// credentials (session, API key, Unix socket) pass through untouched.
+		r.Use(AbilityMiddleware)
+
+		// Session / identity
+		r.Get("/auth/me", h.AuthMeHandler)
+		r.Post("/auth/logout", h.AuthLogoutHandler)
+
+		// Two-factor (self-service; blocked for scoped tokens)
+		r.Post("/auth/2fa/setup", h.TwoFactorSetupHandler)
+		r.Post("/auth/2fa/enable", h.TwoFactorEnableHandler)
+		r.Post("/auth/2fa/disable", h.TwoFactorDisableHandler)
+
+		// Scoped personal access tokens (blocked for scoped tokens themselves)
+		r.Post("/tokens", h.CreateAPITokenHandler)
+		r.Get("/tokens", h.ListAPITokensHandler)
+		r.Delete("/tokens", h.RevokeAPITokenHandler)
+
+		// Password management (admin: anyone, user: self only)
+		r.Post("/users/{name}/password", h.SetUserPasswordHandler)
 
 		r.Post("/sites", h.CreateSite)
 		r.Get("/sites", h.ListSites)

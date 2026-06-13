@@ -118,6 +118,41 @@ var userResetKeyCmd = &cobra.Command{
 	},
 }
 
+var userPasswdCmd = &cobra.Command{
+	Use:   "passwd [name]",
+	Short: "Set a user's login password (for the web UI)",
+	Long: `Set a login password so the user can sign in to the web UI with
+username + password instead of an API key.
+
+The password can be passed with --password or piped on stdin:
+  apod user passwd alice --password 'long-secret-here'
+  echo 'long-secret-here' | apod user passwd alice`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client := NewClient(flagRemote, flagKey)
+
+		password, _ := cmd.Flags().GetString("password")
+		if password == "" {
+			// Read a single line from stdin (supports piping).
+			var line string
+			fmt.Fscanln(os.Stdin, &line)
+			password = line
+		}
+		if password == "" {
+			return fmt.Errorf("no password given: use --password or pipe it on stdin")
+		}
+
+		body := map[string]string{"password": password}
+		_, err := client.Post(fmt.Sprintf("/api/v1/users/%s/password", args[0]), body)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Password set for %s. Existing UI sessions were signed out.\n", args[0])
+		return nil
+	},
+}
+
 var transferCmd = &cobra.Command{
 	Use:   "transfer [domain] [new-owner]",
 	Short: "Transfer site ownership to another user (use '' to unassign)",
@@ -144,6 +179,8 @@ func init() {
 	userCmd.AddCommand(userListCmd)
 	userCmd.AddCommand(userDeleteCmd)
 	userCmd.AddCommand(userResetKeyCmd)
+	userCmd.AddCommand(userPasswdCmd)
+	userPasswdCmd.Flags().String("password", "", "the password to set (min 8 chars)")
 	rootCmd.AddCommand(userCmd)
 	rootCmd.AddCommand(transferCmd)
 }

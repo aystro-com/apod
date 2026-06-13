@@ -100,6 +100,16 @@ func New(cfg Config) (*Engine, error) {
 	return eng, nil
 }
 
+// NewWithDB builds a minimal Engine around an existing database handle.
+// Subsystems that need Docker stay nil — intended for tests and tooling that
+// only exercise database-backed features (users, auth, activity log).
+func NewWithDB(database *db.DB) *Engine {
+	return &Engine{
+		db:    database,
+		locks: NewLockManager(),
+	}
+}
+
 func (e *Engine) Close() {
 	if e.scheduler != nil {
 		e.scheduler.Stop()
