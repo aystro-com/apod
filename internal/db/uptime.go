@@ -98,7 +98,9 @@ func (d *DB) LogUptimeResult(domain string, statusCode, responseMs int, isUp boo
 func (d *DB) GetUptimeStats(domain string, hours int) (*UptimeStats, error) {
 	stats := &UptimeStats{}
 	err := d.conn.QueryRow(
-		`SELECT COUNT(*), COALESCE(AVG(response_ms), 0), COALESCE(SUM(CASE WHEN is_up = 0 THEN 1 ELSE 0 END), 0)
+		// CAST the average to INTEGER — SQLite's AVG returns a float, which fails
+		// to scan into the int AvgResponseMs field.
+		`SELECT COUNT(*), CAST(COALESCE(AVG(response_ms), 0) AS INTEGER), COALESCE(SUM(CASE WHEN is_up = 0 THEN 1 ELSE 0 END), 0)
 		 FROM uptime_logs WHERE site_domain = ? AND checked_at > datetime('now', ?)`,
 		domain, fmt.Sprintf("-%d hours", hours),
 	).Scan(&stats.TotalChecks, &stats.AvgResponseMs, &stats.TotalDowntime)

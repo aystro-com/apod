@@ -99,6 +99,12 @@ func (e *Engine) getStorage(ctx context.Context, storageName, owner string) (sto
 	return storage.New(sc.Driver, config)
 }
 
+// dirHasContent reports whether path exists and contains at least one entry.
+func dirHasContent(path string) bool {
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) > 0
+}
+
 func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (int64, error) {
 	if err := e.locks.Acquire(domain); err != nil {
 		return 0, err
@@ -113,6 +119,17 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	driver, err := e.drivers.Load(site.Driver)
 	if err != nil {
 		return 0, fmt.Errorf("load driver: %w", err)
+	}
+
+	// Refuse to back up a site with nothing to store (e.g. a stateless driver
+	// like apod-ui): no databases, no declared file paths, and no data on disk.
+	// Otherwise we'd produce a useless ~200-byte archive whose "restore" just
+	// stops and restarts the container.
+	if len(driver.Backup.Databases) == 0 && len(driver.Backup.Paths) == 0 {
+		_, dataRoot := e.SiteDir(site.Owner, domain)
+		if !dirHasContent(dataRoot) {
+			return 0, fmt.Errorf("nothing to back up: %q stores no data (stateless driver %q)", domain, site.Driver)
+		}
 	}
 
 	store, err := e.getStorage(ctx, storageName, site.Owner)
@@ -315,16 +332,29 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 		return fmt.Errorf("download backup: %w", err)
 	}
 
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		return fmt.Errorf("open zip: %w", err)
+	}
+
+	// Refuse a backup with no restorable content *before* touching the site —
+	// otherwise we'd stop it and put nothing back, breaking it (e.g. restoring
+	// a stateless-site backup).
+	hasContent := false
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, "files/") || strings.HasPrefix(f.Name, "data/") || strings.HasPrefix(f.Name, "databases/") {
+			hasContent = true
+			break
+		}
+	}
+	if !hasContent {
+		return fmt.Errorf("backup %d has no restorable data; refusing to restore", backupID)
+	}
+
 	// Stop site
 	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	for _, id := range ids {
 		e.docker.StopContainer(ctx, id)
-	}
-
-	// Extract
-	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
-	if err != nil {
-		return fmt.Errorf("open zip: %w", err)
 	}
 
 	siteRoot, dataRoot := e.SiteDir(site.Owner, domain)
