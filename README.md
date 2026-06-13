@@ -731,7 +731,7 @@ When `--listen` is set, both the Unix socket (admin, local) and TCP (authenticat
 
 ## REST API Reference
 
-Every CLI command maps to an API endpoint. The API listens on a Unix socket (`/var/run/apod.sock`) by default, or on a TCP port with `--listen`.
+Every CLI command maps to an API endpoint. The API listens on a Unix socket (`/run/apod/apod.sock`) by default, or on a TCP port with `--listen`.
 
 ### Authentication
 

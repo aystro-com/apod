@@ -10,7 +10,7 @@ import (
 	"net/http"
 )
 
-const defaultSocketPath = "/var/run/apod.sock"
+const defaultSocketPath = "/run/apod/apod.sock"
 
 type Client struct {
 	http       *http.Client

@@ -198,7 +198,7 @@ WantedBy=multi-user.target
 				fmt.Printf("  Installing apod-ui on %s ...\n", uiDomain)
 				// Give the freshly-started daemon a moment to open its socket.
 				for i := 0; i < 10; i++ {
-					if _, serr := os.Stat("/var/run/apod.sock"); serr == nil {
+					if _, serr := os.Stat("/run/apod/apod.sock"); serr == nil {
 						break
 					}
 					time.Sleep(time.Second)

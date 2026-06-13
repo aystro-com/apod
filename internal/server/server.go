@@ -14,7 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const defaultSocketPath = "/var/run/apod.sock"
+// The control socket lives in its own directory so containers (e.g. the
+// apod-ui driver) can bind-mount the *directory* and keep reaching the socket
+// across daemon restarts, which recreate the socket with a new inode.
+const defaultSocketPath = "/run/apod/apod.sock"
 
 type Server struct {
 	handler *Handler

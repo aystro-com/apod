@@ -10,9 +10,10 @@ services:
     ports:
       - "80"
     volumes:
-      # The apod daemon control socket, bind-mounted read-only so the container
-      # can reverse-proxy /api and /webhook to it (same-origin, no CORS).
-      - "/var/run/apod.sock:/var/run/apod.sock:ro"
+      # Mount the daemon's control-socket DIRECTORY (read-only), not the socket
+      # file — so the proxy keeps working across daemon restarts, which recreate
+      # the socket with a new inode. nginx proxies /api and /webhook to it.
+      - "/run/apod:/run/apod:ro"
 
 healthcheck:
   url: "http://localhost:80"
