@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -10,37 +11,140 @@ const (
 	traefikContainerName = "apod-traefik"
 	traefikImage         = "traefik:v2.11"
 	apodNetwork          = "apod-net"
+
+	// certResolverName is the Traefik ACME resolver attached to site routers.
+	certResolverName = "letsencrypt"
 )
 
-type Traefik struct {
-	docker    *Docker
-	acmeEmail string
+// TLS strategies. apod has to issue certs across very different network
+// topologies, and no single ACME challenge works everywhere — so the strategy
+// is selectable:
+//
+//   - auto:     ACME HTTP-01. Zero-config default. Needs the domain to resolve
+//     straight to this server on :80 (direct DNS / grey-cloud).
+//   - dns:      ACME DNS-01 via a provider API. Works behind Cloudflare proxy,
+//     CDNs, or closed :80, and is the only way to get wildcards.
+//   - external: No ACME. An upstream proxy (e.g. Cloudflare "Full") terminates
+//     public TLS; Traefik serves its default self-signed cert on :443
+//     (or a cert dropped into the file provider, e.g. a Cloudflare
+//     Origin certificate) and does not force an HTTP->HTTPS redirect.
+const (
+	TLSModeAuto     = "auto"
+	TLSModeDNS      = "dns"
+	TLSModeExternal = "external"
+)
+
+// dnsProviderEnvPrefixes are environment-variable name prefixes forwarded from
+// the daemon's environment into the Traefik container so lego's DNS-01
+// providers can authenticate. Covers the common providers; set the relevant
+// vars in the apod service environment (see EnvironmentFile in `apod init`).
+var dnsProviderEnvPrefixes = []string{
+	"CF_", "CLOUDFLARE_", // Cloudflare
+	"AWS_",                 // Route 53
+	"DO_", "DIGITALOCEAN_", // DigitalOcean
+	"AZURE_",       // Azure
+	"GCE_", "GCP_", // Google Cloud
+	"HETZNER_",   // Hetzner
+	"LINODE_",    // Linode
+	"OVH_",       // OVH
+	"VULTR_",     // Vultr
+	"NAMECHEAP_", // Namecheap
+	"GANDIV5_",   // Gandi
+	"PORKBUN_",   // Porkbun
+	"DNSIMPLE_",  // DNSimple
 }
 
-func NewTraefik(docker *Docker, acmeEmail string) *Traefik {
-	return &Traefik{docker: docker, acmeEmail: acmeEmail}
+// TLSConfig describes how Traefik should obtain/serve certificates.
+type TLSConfig struct {
+	Mode        string // one of TLSMode*; empty means auto
+	Email       string // ACME account email (auto/dns)
+	DNSProvider string // lego provider code for dns mode, e.g. "cloudflare"
 }
 
-func traefikCommand(email string) []string {
-	if email == "" {
-		email = "admin@localhost"
+func (c TLSConfig) mode() string {
+	if c.Mode == "" {
+		return TLSModeAuto
 	}
-	return []string{
+	return c.Mode
+}
+
+// CertResolver returns the Traefik certresolver name to attach to site routers,
+// or "" when ACME is not used (external TLS).
+func (c TLSConfig) CertResolver() string {
+	if c.mode() == TLSModeExternal {
+		return ""
+	}
+	return certResolverName
+}
+
+type Traefik struct {
+	docker *Docker
+	tls    TLSConfig
+}
+
+func NewTraefik(docker *Docker, tls TLSConfig) *Traefik {
+	return &Traefik{docker: docker, tls: tls}
+}
+
+func traefikCommand(cfg TLSConfig) []string {
+	args := []string{
 		"--api.dashboard=false",
 		"--providers.docker=true",
 		"--providers.docker.exposedbydefault=false",
 		"--providers.docker.network=" + apodNetwork,
 		"--entrypoints.web.address=:80",
 		"--entrypoints.websecure.address=:443",
-		"--entrypoints.web.http.redirections.entrypoint.to=websecure",
-		"--entrypoints.web.http.redirections.entrypoint.scheme=https",
-		"--certificatesresolvers.letsencrypt.acme.email=" + email,
-		"--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json",
-		"--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web",
 		"--serversTransport.insecureSkipVerify=true",
 		"--providers.file.directory=/etc/traefik/dynamic",
 		"--providers.file.watch=true",
 	}
+
+	if cfg.mode() == TLSModeExternal {
+		// Upstream terminates TLS. No ACME, and no forced HTTP->HTTPS redirect
+		// (that would loop under Cloudflare "Flexible"). Traefik serves its
+		// default cert on :443, or a cert from the file provider.
+		return args
+	}
+
+	email := cfg.Email
+	if email == "" {
+		email = "admin@localhost" // ACME will reject this; `apod init` validates.
+	}
+	r := "--certificatesresolvers." + certResolverName + ".acme."
+	args = append(args,
+		"--entrypoints.web.http.redirections.entrypoint.to=websecure",
+		"--entrypoints.web.http.redirections.entrypoint.scheme=https",
+		r+"email="+email,
+		r+"storage=/letsencrypt/acme.json",
+	)
+	if cfg.mode() == TLSModeDNS {
+		args = append(args,
+			r+"dnschallenge=true",
+			r+"dnschallenge.provider="+cfg.DNSProvider,
+		)
+	} else {
+		args = append(args, r+"httpchallenge.entrypoint=web")
+	}
+	return args
+}
+
+// dnsProviderEnv collects credential env vars (KEY=VALUE) from the daemon's own
+// environment to forward to the Traefik container for DNS-01.
+func dnsProviderEnv() []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		for _, p := range dnsProviderEnvPrefixes {
+			if strings.HasPrefix(name, p) {
+				env = append(env, kv)
+				break
+			}
+		}
+	}
+	return env
 }
 
 func (t *Traefik) EnsureRunning(ctx context.Context) error {
@@ -60,25 +164,29 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 		return fmt.Errorf("pull traefik image: %w", err)
 	}
 
-	cmd := traefikCommand(t.acmeEmail)
+	var env []string
+	if t.tls.mode() == TLSModeDNS {
+		env = dnsProviderEnv()
+	}
 
 	id, err := t.docker.CreateContainer(ctx, ContainerConfig{
 		Name:  traefikContainerName,
 		Image: traefikImage,
+		Env:   env,
 		Labels: map[string]string{
 			"apod.managed": "true",
 			"apod.role":    "proxy",
 		},
 		Volumes: map[string]string{
-			"/var/run/docker.sock":          "/var/run/docker.sock",
-			"apod-letsencrypt":              "/letsencrypt",
-			"/etc/apod/traefik/dynamic":     "/etc/traefik/dynamic:ro",
+			"/var/run/docker.sock":      "/var/run/docker.sock",
+			"apod-letsencrypt":          "/letsencrypt",
+			"/etc/apod/traefik/dynamic": "/etc/traefik/dynamic:ro",
 		},
 		Ports: map[string]string{
 			"80":  "80",
 			"443": "443",
 		},
-		Args: cmd,
+		Args: traefikCommand(t.tls),
 	})
 	if err != nil {
 		return fmt.Errorf("create traefik container: %w", err)
@@ -95,7 +203,7 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 	return nil
 }
 
-func TraefikLabels(siteDomain string, domains []string, servicePort string, backendScheme string) map[string]string {
+func TraefikLabels(siteDomain string, domains []string, servicePort string, backendScheme string, certResolver string) map[string]string {
 	routerName := strings.ReplaceAll(siteDomain, ".", "-")
 
 	var hostRules []string
@@ -108,10 +216,16 @@ func TraefikLabels(siteDomain string, domains []string, servicePort string, back
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.%s.rule", routerName):                      rule,
 		fmt.Sprintf("traefik.http.routers.%s.tls", routerName):                       "true",
-		fmt.Sprintf("traefik.http.routers.%s.tls.certresolver", routerName):          "letsencrypt",
 		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", routerName): servicePort,
 		labelPrefix + "site":    siteDomain,
 		labelPrefix + "managed": "true",
+	}
+
+	// Attach an ACME resolver only when apod is managing certs (auto/dns).
+	// In external mode certResolver is empty and Traefik serves the default
+	// cert (or a file-provider cert) for the router.
+	if certResolver != "" {
+		labels[fmt.Sprintf("traefik.http.routers.%s.tls.certresolver", routerName)] = certResolver
 	}
 
 	if backendScheme != "" {

@@ -29,16 +29,59 @@ var initCmd = &cobra.Command{
 		}
 		fmt.Println("OK")
 
-		// ACME email
-		fmt.Print("\nEmail for SSL certificates (Let's Encrypt): ")
-		email, _ := reader.ReadString('\n')
-		email = strings.TrimSpace(email)
-		if email == "" {
-			return fmt.Errorf("email is required for SSL certificates")
+		// TLS strategy. Different network topologies need different ACME
+		// challenges, so let the operator choose how certs are issued/served.
+		fmt.Println("\nHow should apod handle SSL/TLS?")
+		fmt.Println("  1) auto     — Let's Encrypt HTTP-01 (default). The domain must resolve")
+		fmt.Println("                straight to this server. Best for plain DNS / grey-cloud.")
+		fmt.Println("  2) dns      — Let's Encrypt DNS-01 via your DNS provider's API. Works")
+		fmt.Println("                behind Cloudflare proxy / CDNs, and supports wildcards.")
+		fmt.Println("  3) external — No Let's Encrypt; an upstream proxy (e.g. Cloudflare 'Full')")
+		fmt.Println("                terminates TLS. apod serves a self-signed / origin cert.")
+		fmt.Print("Choice [1]: ")
+		tlsChoice, _ := reader.ReadString('\n')
+
+		var tlsMode, dnsProvider, email, dnsToken string
+		switch strings.TrimSpace(tlsChoice) {
+		case "2", "dns":
+			tlsMode = "dns"
+		case "3", "external":
+			tlsMode = "external"
+		default:
+			tlsMode = "auto"
+		}
+
+		// ACME email — required for auto/dns (Let's Encrypt rejects empty and
+		// @localhost), unused in external mode.
+		if tlsMode != "external" {
+			for {
+				fmt.Print("\nEmail for Let's Encrypt certificates: ")
+				email, _ = reader.ReadString('\n')
+				email = strings.TrimSpace(email)
+				if email != "" && strings.Contains(email, "@") && !strings.HasSuffix(email, "@localhost") {
+					break
+				}
+				fmt.Println("  A real email is required (Let's Encrypt rejects empty / @localhost).")
+			}
+		}
+
+		// DNS-01 provider + credentials.
+		if tlsMode == "dns" {
+			fmt.Print("DNS provider (lego code) [cloudflare]: ")
+			dnsProvider, _ = reader.ReadString('\n')
+			dnsProvider = strings.TrimSpace(dnsProvider)
+			if dnsProvider == "" {
+				dnsProvider = "cloudflare"
+			}
+			if dnsProvider == "cloudflare" {
+				fmt.Print("Cloudflare API token (Zone:DNS:Edit — leave blank to add later): ")
+				dnsToken, _ = reader.ReadString('\n')
+				dnsToken = strings.TrimSpace(dnsToken)
+			}
 		}
 
 		// Data directory
-		fmt.Print("Data directory [/var/lib/apod]: ")
+		fmt.Print("\nData directory [/var/lib/apod]: ")
 		dataDir, _ := reader.ReadString('\n')
 		dataDir = strings.TrimSpace(dataDir)
 		if dataDir == "" {
@@ -55,10 +98,29 @@ var initCmd = &cobra.Command{
 		os.MkdirAll("/etc/apod", 0755)
 		fmt.Println("OK")
 
+		// DNS credentials go in an env file the service loads, kept out of the
+		// world-readable unit file.
+		if tlsMode == "dns" && dnsProvider == "cloudflare" && dnsToken != "" {
+			if werr := os.WriteFile("/etc/apod/apod.env", []byte("CF_DNS_API_TOKEN="+dnsToken+"\n"), 0600); werr != nil {
+				fmt.Printf("  Warning: could not write /etc/apod/apod.env: %v\n", werr)
+			}
+		}
+
 		// Copy bundled drivers if available
 		fmt.Print("Setting up drivers... ")
 		exec.Command("apod", "update", "drivers").Run()
 		fmt.Println("OK")
+
+		// Build the daemon command for the chosen TLS mode.
+		execStart := "/usr/local/bin/apod server --data-dir " + dataDir
+		switch tlsMode {
+		case "dns":
+			execStart += " --tls-mode dns --acme-dns-provider " + dnsProvider + " --acme-email " + email
+		case "external":
+			execStart += " --tls-mode external"
+		default:
+			execStart += " --acme-email " + email
+		}
 
 		// Create systemd service
 		fmt.Print("Creating systemd service... ")
@@ -69,24 +131,40 @@ Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/apod server --acme-email %s --data-dir %s
+EnvironmentFile=-/etc/apod/apod.env
+ExecStart=%s
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, email, dataDir)
+`, execStart)
 
 		if werr := os.WriteFile("/etc/systemd/system/apod.service", []byte(service), 0644); werr != nil {
 			fmt.Println("FAILED")
 			fmt.Printf("  Could not write service file: %v\n", werr)
-			fmt.Println("  You can start manually: apod server --acme-email", email)
+			fmt.Println("  You can start manually:", execStart)
 		} else {
 			fmt.Println("OK")
 			exec.Command("systemctl", "daemon-reload").Run()
 			exec.Command("systemctl", "enable", "apod").Run()
 			exec.Command("systemctl", "start", "apod").Run()
 			fmt.Println("  Service enabled and started.")
+		}
+
+		// Mode-specific follow-up.
+		switch tlsMode {
+		case "dns":
+			if dnsProvider != "cloudflare" || dnsToken == "" {
+				fmt.Println()
+				fmt.Printf("  DNS-01 with %q needs credentials. Add them to /etc/apod/apod.env\n", dnsProvider)
+				fmt.Println("  (e.g. CF_DNS_API_TOKEN=...), then: systemctl restart apod")
+			}
+		case "external":
+			fmt.Println()
+			fmt.Println("  External TLS: set your proxy to terminate HTTPS (e.g. Cloudflare SSL")
+			fmt.Println("  mode 'Full'). To present a trusted origin cert, drop cert/key into")
+			fmt.Println("  /etc/apod/traefik/dynamic/ (e.g. a Cloudflare Origin certificate).")
 		}
 
 		fmt.Println()

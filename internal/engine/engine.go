@@ -25,6 +25,7 @@ type Engine struct {
 	db            *db.DB
 	docker        *Docker
 	traefik       *Traefik
+	tls           TLSConfig
 	drivers       *DriverLoader
 	locks         *LockManager
 	dataDir       string
@@ -34,10 +35,12 @@ type Engine struct {
 }
 
 type Config struct {
-	DBPath    string
-	DataDir   string
-	DriverDir string
-	AcmeEmail string
+	DBPath          string
+	DataDir         string
+	DriverDir       string
+	AcmeEmail       string
+	TLSMode         string // auto (default) | dns | external
+	ACMEDNSProvider string // lego provider code when TLSMode == dns
 }
 
 func New(cfg Config) (*Engine, error) {
@@ -71,10 +74,17 @@ func New(cfg Config) (*Engine, error) {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
 
+	tls := TLSConfig{
+		Mode:        cfg.TLSMode,
+		Email:       cfg.AcmeEmail,
+		DNSProvider: cfg.ACMEDNSProvider,
+	}
+
 	eng := &Engine{
 		db:      database,
 		docker:  docker,
-		traefik: NewTraefik(docker, cfg.AcmeEmail),
+		traefik: NewTraefik(docker, tls),
+		tls:     tls,
 		drivers: NewDriverLoader(cfg.DriverDir),
 		locks:   NewLockManager(),
 		dataDir: cfg.DataDir,
@@ -338,7 +348,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		}
 		if svcName == "app" && len(svc.Ports) > 0 {
 			port := svc.Ports[0]
-			traefikLabels := TraefikLabels(opts.Domain, []string{opts.Domain}, port, svc.BackendScheme)
+			traefikLabels := TraefikLabels(opts.Domain, []string{opts.Domain}, port, svc.BackendScheme, e.tls.CertResolver())
 			// Tell Traefik to use the site-specific network to reach this container
 			routerName := strings.ReplaceAll(opts.Domain, ".", "-")
 			traefikLabels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", routerName)] = port

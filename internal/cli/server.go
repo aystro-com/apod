@@ -13,12 +13,14 @@ import (
 )
 
 var (
-	flagListen    string
-	flagTLS       bool
-	flagDBPath    string
-	flagDataDir   string
-	flagDriverDir string
-	flagAcmeEmail string
+	flagListen      string
+	flagTLS         bool
+	flagDBPath      string
+	flagDataDir     string
+	flagDriverDir   string
+	flagAcmeEmail   string
+	flagTLSMode     string
+	flagDNSProvider string
 )
 
 var serverCmd = &cobra.Command{
@@ -26,10 +28,12 @@ var serverCmd = &cobra.Command{
 	Short: "Start the apod daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		eng, err := engine.New(engine.Config{
-			DBPath:    flagDBPath,
-			DataDir:   flagDataDir,
-			DriverDir: flagDriverDir,
-			AcmeEmail: flagAcmeEmail,
+			DBPath:          flagDBPath,
+			DataDir:         flagDataDir,
+			DriverDir:       flagDriverDir,
+			AcmeEmail:       flagAcmeEmail,
+			TLSMode:         flagTLSMode,
+			ACMEDNSProvider: flagDNSProvider,
 		})
 		if err != nil {
 			return fmt.Errorf("initialize engine: %w", err)
@@ -62,5 +66,7 @@ func init() {
 	serverCmd.Flags().StringVar(&flagDataDir, "data-dir", "", "Data directory (default /var/lib/apod)")
 	serverCmd.Flags().StringVar(&flagDriverDir, "driver-dir", "", "Driver directory (default /etc/apod/drivers)")
 	serverCmd.Flags().StringVar(&flagAcmeEmail, "acme-email", "", "Email for Let's Encrypt certificates")
+	serverCmd.Flags().StringVar(&flagTLSMode, "tls-mode", "", "TLS strategy: auto (HTTP-01, default), dns (DNS-01), external (proxy-terminated)")
+	serverCmd.Flags().StringVar(&flagDNSProvider, "acme-dns-provider", "", "lego DNS provider for --tls-mode=dns (e.g. cloudflare)")
 	rootCmd.AddCommand(serverCmd)
 }

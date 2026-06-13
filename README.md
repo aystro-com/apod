@@ -207,11 +207,42 @@ apod version             # Check current version
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--acme-email` | | Email for Let's Encrypt certificates (required for SSL) |
+| `--acme-email` | | Email for Let's Encrypt certificates (required for `auto`/`dns`) |
+| `--tls-mode` | `auto` | Certificate strategy: `auto` (HTTP-01), `dns` (DNS-01), `external` (proxy-terminated) |
+| `--acme-dns-provider` | | lego DNS provider for `--tls-mode=dns` (e.g. `cloudflare`) |
 | `--listen` | Unix socket | TCP address for remote API access (e.g., `0.0.0.0:8443`) |
 | `--db` | `/etc/apod/apod.db` | SQLite database path |
 | `--data-dir` | `/var/lib/apod` | Site data directory |
 | `--driver-dir` | `/etc/apod/drivers` | Driver YAML directory |
+
+### TLS / SSL
+
+apod issues and renews certificates through Traefik. Because servers sit behind
+very different network setups, the strategy is selectable — `apod init` asks, or
+set `--tls-mode`:
+
+| Mode | How certs are obtained | Use when |
+|------|------------------------|----------|
+| `auto` (default) | Let's Encrypt **HTTP-01** | The domain resolves straight to this server on port 80 (direct DNS, or Cloudflare **DNS-only** / grey-cloud). |
+| `dns` | Let's Encrypt **DNS-01** via your DNS provider's API | Behind Cloudflare's proxy (orange-cloud), a CDN, or a load balancer — or you need wildcards. Needs no inbound port 80. |
+| `external` | None — your proxy terminates TLS | An upstream (e.g. Cloudflare SSL mode **Full**) handles public HTTPS. apod serves its self-signed default cert, or a cert you drop into `/etc/apod/traefik/dynamic/` (e.g. a Cloudflare **Origin Certificate** for Full (strict)). |
+
+**DNS-01 credentials.** Put your provider's API credentials in the apod service
+environment — `apod init` writes them to `/etc/apod/apod.env` (loaded via the
+unit's `EnvironmentFile`). For Cloudflare, use a token with `Zone:DNS:Edit`:
+
+```bash
+# /etc/apod/apod.env
+CF_DNS_API_TOKEN=your-scoped-token
+```
+
+```bash
+apod server --tls-mode dns --acme-dns-provider cloudflare --acme-email you@example.com
+```
+
+apod forwards common provider env vars (Cloudflare, Route 53, DigitalOcean, Azure,
+Google Cloud, Hetzner, Linode, OVH, Vultr, Namecheap, Gandi, …) into Traefik; see
+Traefik's lego provider list for the exact variable names.
 
 ### Data Layout
 
