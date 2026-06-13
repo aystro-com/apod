@@ -43,12 +43,32 @@ The panel is served by Traefik with automatic SSL and talks to the daemon over i
 
 ## Requirements
 
-- A Linux server with **root** access (Ubuntu/Debian recommended)
-- **[Docker](https://docs.docker.com/engine/install/)** — the install script can set this up for you
-- **systemd** — runs the managed `apod` daemon
-- Ports **80** and **443** free for Traefik (automatic SSL); **8443** as well if you use the remote API
-- A **domain pointing at the server** for any site that needs SSL (including the web UI)
-- Optional: `quota` tools, for kernel-enforced disk quotas
+- Linux server (Ubuntu 22.04+ recommended)
+- Docker Engine 24.0+
+- UFW firewall (recommended)
+- Go 1.22+ (for building from source)
+- Root access
+- Ports 80 and 443 available
+- `quota` package (for disk quota enforcement)
+
+### Install Dependencies
+
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+systemctl enable docker && systemctl start docker
+
+# Install UFW (firewall)
+apt install -y ufw
+ufw allow 22/tcp    # SSH
+ufw allow 80/tcp    # HTTP
+ufw allow 443/tcp   # HTTPS
+ufw allow 8443/tcp  # apod API (if using remote access)
+ufw --force enable
+
+# Install quota tools (for disk limits)
+apt install -y quota
+```
 
 ## Quick Start
 
