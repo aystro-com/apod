@@ -391,8 +391,20 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		}
 	}
 
+	// Encrypt the archive at rest (it contains databases and secrets).
+	payload := buf.Bytes()
+	if key, kerr := e.backupKey(); kerr == nil {
+		if enc, eerr := encryptBackup(key, payload); eerr == nil {
+			payload = enc
+		} else {
+			return 0, fmt.Errorf("encrypt backup: %w", eerr)
+		}
+	} else {
+		return 0, fmt.Errorf("backup key: %w", kerr)
+	}
+
 	// Upload
-	if err := store.Upload(ctx, zipKey, bytes.NewReader(buf.Bytes())); err != nil {
+	if err := store.Upload(ctx, zipKey, bytes.NewReader(payload)); err != nil {
 		return 0, fmt.Errorf("upload backup: %w", err)
 	}
 
@@ -455,6 +467,10 @@ func (e *Engine) CreateSiteFromBackup(ctx context.Context, backupID int64, newDo
 	if err := store.Download(ctx, backup.Path, &buf); err != nil {
 		return fmt.Errorf("download backup: %w", err)
 	}
+	plain, err := e.decryptBackupBytes(buf.Bytes())
+	if err != nil {
+		return err
+	}
 
 	// ImportSite reads from a file path, so stage the archive in a temp file.
 	tmp, err := os.CreateTemp("", "apod-backup-*.zip")
@@ -462,7 +478,7 @@ func (e *Engine) CreateSiteFromBackup(ctx context.Context, backupID int64, newDo
 		return fmt.Errorf("stage backup: %w", err)
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
+	if _, err := tmp.Write(plain); err != nil {
 		tmp.Close()
 		return fmt.Errorf("stage backup: %w", err)
 	}
@@ -503,8 +519,12 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 	if err := store.Download(ctx, backup.Path, &buf); err != nil {
 		return fmt.Errorf("download backup: %w", err)
 	}
+	plain, err := e.decryptBackupBytes(buf.Bytes())
+	if err != nil {
+		return err
+	}
 
-	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	zr, err := zip.NewReader(bytes.NewReader(plain), int64(len(plain)))
 	if err != nil {
 		return fmt.Errorf("open zip: %w", err)
 	}
