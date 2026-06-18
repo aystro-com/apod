@@ -267,4 +267,18 @@ func ExpandDriverVariables(driver *models.Driver, vars map[string]string) {
 		driver.Files[i].Path = expandVariables(f.Path, vars)
 		driver.Files[i].Content = expandVariables(f.Content, vars)
 	}
+	// Deploy hooks, healthcheck and cron commands can reference site variables
+	// too — expand them so drivers stay stack-agnostic everywhere, not just in
+	// service definitions.
+	for i, h := range driver.Deploy.BeforeDeploy {
+		driver.Deploy.BeforeDeploy[i] = expandVariables(h, vars)
+	}
+	for i, h := range driver.Deploy.AfterDeploy {
+		driver.Deploy.AfterDeploy[i] = expandVariables(h, vars)
+	}
+	driver.Healthcheck.URL = expandVariables(driver.Healthcheck.URL, vars)
+	for i, c := range driver.Cron {
+		driver.Cron[i].Command = expandVariables(c.Command, vars)
+		driver.Cron[i].Schedule = expandVariables(c.Schedule, vars)
+	}
 }

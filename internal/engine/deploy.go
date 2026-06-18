@@ -35,6 +35,9 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 	if err != nil {
 		return fmt.Errorf("load driver: %w", err)
 	}
+	// Expand ${variables} in the freshly-loaded driver (deploy hooks, etc.) with
+	// this site's values, so hooks can reference the domain, db creds and paths.
+	ExpandDriverVariables(driver, e.siteVars(site))
 
 	// Auto-backup before deploy (non-blocking — log warning on failure)
 	e.locks.Release(domain) // release lock temporarily for backup

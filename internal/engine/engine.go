@@ -290,12 +290,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 	// This keeps the core engine generic — drivers declare what they need.
 	// Order matters: jwt_secret must exist before anon_key/service_role_key.
 	driverText := driverRawText(driver)
-	genOrder := []string{
-		"jwt_secret", "anon_key", "service_role_key",
-		"secret_key_base", "vault_enc_key", "dashboard_password",
-		"pg_meta_crypto_key", "s3_access_key_id", "s3_access_key_secret",
-		"logflare_public_token", "logflare_private_token",
-	}
+	genOrder := generatedSecretNames
 	generators := secretGenerators()
 	for _, varName := range genOrder {
 		if strings.Contains(driverText, "${"+varName+"}") {
@@ -724,6 +719,41 @@ func parseMemoryMB(s string) int64 {
 	}
 	n, _ := strconv.ParseInt(s, 10, 64)
 	return n
+}
+
+// generatedSecretNames lists the optional secrets the engine generates on
+// demand (only when a driver references them). Order matters: jwt_secret must
+// exist before anon_key/service_role_key.
+var generatedSecretNames = []string{
+	"jwt_secret", "anon_key", "service_role_key",
+	"secret_key_base", "vault_enc_key", "dashboard_password",
+	"pg_meta_crypto_key", "s3_access_key_id", "s3_access_key_secret",
+	"logflare_public_token", "logflare_private_token",
+}
+
+// siteVars reconstructs the driver variable map for an existing site so driver
+// strings (deploy hooks, healthcheck, cron, …) can be expanded with the same
+// values used at creation. Generated secrets and the DB password come from the
+// secrets store; name/user/paths are deterministic from the domain.
+func (e *Engine) siteVars(site *models.Site) map[string]string {
+	siteRoot, dataRoot := e.SiteDir(site.Owner, site.Domain)
+	dbName := strings.ReplaceAll(site.Domain, ".", "_")
+	vars := map[string]string{
+		"site_root":    siteRoot,
+		"data_root":    dataRoot,
+		"site_domain":  site.Domain,
+		"site_db_name": dbName,
+		"site_db_user": dbName,
+	}
+	if pass, ok, _ := e.db.GetSiteSecret(site.Domain, "db_password"); ok {
+		vars["site_db_pass"] = pass
+	}
+	for _, name := range generatedSecretNames {
+		if v, ok, _ := e.db.GetSiteSecret(site.Domain, name); ok {
+			vars[name] = v
+		}
+	}
+	return vars
 }
 
 func randomHex(n int) string {
