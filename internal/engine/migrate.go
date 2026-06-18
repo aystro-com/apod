@@ -247,11 +247,15 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 		return err
 	}
 
-	// Decide how to restore the database. Preferred path: keep the source's DB
-	// credentials and name so the raw data directory in the backup restores
-	// as-is (the DB lives on an isolated per-site network, so reusing the
-	// password is not a security concern). The password comes from metadata,
-	// falling back to the .env captured in the backup for older archives.
+	// Database restore strategy: always rebuild DB data from the logical dump
+	// (databases/), never from the raw data directory — a hot file copy of a
+	// live DB is not crash-consistent (Postgres refuses to start from one). To
+	// keep the cloned app, its restored .env and the DB mutually consistent, we
+	// *preserve* the source's DB credentials and name so the freshly-initialised
+	// DB the dump loads into matches what the app expects. The DB lives on an
+	// isolated per-site network, so reusing the password is not a security
+	// concern. The password comes from metadata, falling back to the .env
+	// captured in the backup for older archives.
 	srcDBPass := meta.DBPassword
 	if srcDBPass == "" {
 		srcDBPass = dbPasswordFromZip(zr)
@@ -297,35 +301,31 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 		}
 	}
 
-	// In the preferred (preserveDB) path we restore the raw data directory as-is
-	// and the credentials match, so nothing is skipped. Only in the legacy
-	// fallback — where the new DB initializes with fresh credentials — must we
-	// skip the source's raw datadir (it would otherwise make the container boot
-	// on a non-empty volume, skip init, and keep the old credentials) and rely
-	// on replaying the logical dump instead.
+	// Never restore a database service's raw data directory — see the strategy
+	// note above. The DB is rebuilt from its logical dump below; restoring the
+	// datadir would make the new container boot on a non-empty volume (skipping
+	// init) and, for Postgres, panic on an inconsistent hot copy.
 	skipDataDirs := map[string]bool{}
-	if !preserveDB {
-		if drv, derr := e.drivers.Load(meta.Driver); derr == nil {
-			for _, dbCfg := range drv.Backup.Databases {
-				svc, ok := drv.Services[dbCfg.Service]
-				if !ok {
+	if drv, derr := e.drivers.Load(meta.Driver); derr == nil {
+		for _, dbCfg := range drv.Backup.Databases {
+			svc, ok := drv.Services[dbCfg.Service]
+			if !ok {
+				continue
+			}
+			for _, vol := range svc.Volumes {
+				host := vol
+				if i := strings.Index(host, ":"); i >= 0 {
+					host = host[:i]
+				}
+				host = strings.TrimPrefix(host, "${data_root}")
+				host = strings.TrimPrefix(host, "/")
+				if host == "" {
 					continue
 				}
-				for _, vol := range svc.Volumes {
-					host := vol
-					if i := strings.Index(host, ":"); i >= 0 {
-						host = host[:i]
-					}
-					host = strings.TrimPrefix(host, "${data_root}")
-					host = strings.TrimPrefix(host, "/")
-					if host == "" {
-						continue
-					}
-					if i := strings.Index(host, "/"); i >= 0 {
-						host = host[:i]
-					}
-					skipDataDirs[host] = true
+				if i := strings.Index(host, "/"); i >= 0 {
+					host = host[:i]
 				}
+				skipDataDirs[host] = true
 			}
 		}
 	}
@@ -374,14 +374,16 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 		}
 	}
 
-	// Import databases (legacy fallback only). In the preferred preserveDB
-	// path the raw data directory was restored as-is with matching credentials,
-	// so there is nothing to replay — and skipping it avoids a fragile reimport
-	// (NUL bytes in dumps, DB-readiness races).
+	// Rebuild databases from their logical dumps. When credentials are preserved
+	// the dump loads into the source-named DB the new container initialised with;
+	// otherwise it targets the new domain's derived name.
 	driver, err := e.drivers.Load(meta.Driver)
-	if err == nil && !preserveDB {
+	if err == nil {
 		isCompose := driver.Type == "compose"
 		dbName := strings.ReplaceAll(domain, ".", "_")
+		if preserveDB {
+			dbName = srcDBName
+		}
 		dbUser := dbName
 
 		for _, dbCfg := range driver.Backup.Databases {

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -287,6 +289,26 @@ func (d *Docker) ExecInContainer(ctx context.Context, containerID string, cmd []
 }
 
 func (d *Docker) ExecInContainerAs(ctx context.Context, containerID string, cmd []string, user string) (string, error) {
+	stdout, stderr, err := d.execCapture(ctx, containerID, cmd, user)
+	if err != nil {
+		return "", err
+	}
+	return string(stdout) + string(stderr), nil
+}
+
+// ExecCaptureStdout runs cmd and returns ONLY stdout, demultiplexed from the
+// Docker exec stream. Required when capturing binary or structured output such
+// as a database dump: the raw stream interleaves stderr and carries 8-byte
+// frame headers that would corrupt it.
+func (d *Docker) ExecCaptureStdout(ctx context.Context, containerID string, cmd []string) ([]byte, error) {
+	stdout, _, err := d.execCapture(ctx, containerID, cmd, "")
+	return stdout, err
+}
+
+// execCapture runs cmd and returns stdout and stderr separately, properly
+// demultiplexing Docker's exec stream (which otherwise prepends an 8-byte
+// frame header to each chunk and interleaves the two streams).
+func (d *Docker) execCapture(ctx context.Context, containerID string, cmd []string, user string) (stdout, stderr []byte, err error) {
 	exec, err := d.cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
 		AttachStdout: true,
@@ -294,21 +316,20 @@ func (d *Docker) ExecInContainerAs(ctx context.Context, containerID string, cmd 
 		User:         user,
 	})
 	if err != nil {
-		return "", fmt.Errorf("create exec: %w", err)
+		return nil, nil, fmt.Errorf("create exec: %w", err)
 	}
 
 	resp, err := d.cli.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
 	if err != nil {
-		return "", fmt.Errorf("attach exec: %w", err)
+		return nil, nil, fmt.Errorf("attach exec: %w", err)
 	}
 	defer resp.Close()
 
-	output, err := io.ReadAll(resp.Reader)
-	if err != nil {
-		return "", fmt.Errorf("read exec output: %w", err)
+	var outBuf, errBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&outBuf, &errBuf, resp.Reader); err != nil {
+		return outBuf.Bytes(), errBuf.Bytes(), fmt.Errorf("read exec output: %w", err)
 	}
-
-	return string(output), nil
+	return outBuf.Bytes(), errBuf.Bytes(), nil
 }
 
 // dbImageRepos are official database image repositories that need gosu/su to

@@ -215,15 +215,19 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 			continue
 		}
 
-		var output string
+		var output []byte
 		var err error
-		// Retry up to 6 times with 10s delay (container may still be starting)
+		// Retry up to 6 times with 10s delay (container may still be starting).
+		// Capture stdout ONLY — a dump must not be polluted by stderr warnings
+		// (e.g. mysqldump's password notice) or exec stream frame headers.
 		for attempt := 0; attempt < 6; attempt++ {
 			if isCompose {
-				output, err = e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, dumpCmd)
+				var s string
+				s, err = e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, dumpCmd)
+				output = []byte(s)
 			} else {
 				containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-				output, err = e.docker.ExecInContainer(ctx, containerName, dumpCmd)
+				output, err = e.docker.ExecCaptureStdout(ctx, containerName, dumpCmd)
 			}
 			if err == nil {
 				break
@@ -233,13 +237,13 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		if err != nil {
 			return 0, fmt.Errorf("dump %s database: %w", dbCfg.Type, err)
 		}
-		if len(strings.TrimSpace(output)) == 0 {
+		if len(bytes.TrimSpace(output)) == 0 {
 			e.LogActivity(domain, "backup_warning", fmt.Sprintf("empty %s dump from %s", dbCfg.Type, dbCfg.Service), "warning")
 			continue
 		}
 		w, _ := zw.Create(fmt.Sprintf("databases/%s_%s.sql.gz", dbCfg.Service, dbCfg.Type))
 		gz := gzip.NewWriter(w)
-		gz.Write([]byte(output))
+		gz.Write(output)
 		gz.Close()
 	}
 
