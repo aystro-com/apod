@@ -639,22 +639,38 @@ apod proxy list <domain>
 apod proxy remove <domain> <rule-id>
 ```
 
-**IP blocking:**
+**IP access (per-site allow / block):**
 
 ```bash
-apod ip block <domain> <ip>
-apod ip unblock <domain> <ip>
+apod ip allow <domain> <ip|cidr>     # Allowlist a source — see note below
+apod ip block <domain> <ip|cidr>     # Block a source
+apod ip unblock <domain> <ip>        # Remove an allow or block rule
 apod ip list <domain>
 ```
+
+Rules accept a single IP or a CIDR range. Once a site has **any** allow rule it
+switches to **allowlist mode** — only listed sources may reach it; everything
+else is rejected at the reverse proxy. With no allow rules, the site is open and
+only `block` rules apply. Rules are materialized into a per-site Traefik
+`ipWhiteList` middleware. Attaching that middleware to live routers is gated
+behind `APOD_ENFORCE_IP_RULES=1` (default off) so the change can be smoke-tested
+against your Traefik first; the middleware file defaults to allow-all so a site
+is never accidentally locked out.
 
 **Firewall (UFW):**
 
 ```bash
-apod firewall status
+apod firewall status                                   # Enabled? + summary
+apod firewall rules                                    # Numbered rule list
 apod firewall enable
-apod firewall allow <port>
+apod firewall allow <port>                             # Allow a port (any source)
 apod firewall deny <port>
+apod firewall allow-from --source <ip|cidr> [--port <port>] [--proto tcp|udp]
+apod firewall delete <num>                             # Delete a rule by its number
 ```
+
+`allow-from` adds a source whitelist (optionally scoped to a port/protocol);
+`rules` prints the numbered list that `delete` operates on.
 
 **SSH keys:**
 
@@ -715,8 +731,14 @@ apod version                 # Show version + DB schema version
 apod update                  # Self-update binary + drivers + auto-restart daemon
 apod update drivers          # Pull latest driver YAMLs only
 apod driver list             # Show installed drivers
+apod driver get <name>       # Print a driver's YAML definition
+apod driver add <name> -f <file.yaml>   # Create or update a custom driver from YAML
+apod driver remove <name>    # Delete a custom driver (built-ins are protected)
 apod init                    # First-run setup (Docker check, SSL email, systemd)
 ```
+
+Custom drivers can also be pasted, validated, and saved from the web panel's
+System page (admin only). The `name:` inside the YAML must match the driver name.
 
 ### Server Daemon
 
@@ -958,12 +980,13 @@ Error responses:
 | `GET` | `/api/v1/sites/{domain}/proxy` | List rules | |
 | `DELETE` | `/api/v1/sites/{domain}/proxy` | Remove rule | `{"id": 1}` |
 
-**IP blocking:**
+**IP access (allow / block):** any allow rule puts the site in allowlist mode.
 
 | Method | Endpoint | Description | Body |
 |--------|----------|-------------|------|
-| `POST` | `/api/v1/sites/{domain}/ip/block` | Block IP | `{"ip": "1.2.3.4"}` |
-| `POST` | `/api/v1/sites/{domain}/ip/unblock` | Unblock IP | `{"ip": "1.2.3.4"}` |
+| `POST` | `/api/v1/sites/{domain}/ip/allow` | Allowlist a source (IP or CIDR) | `{"ip": "203.0.113.0/24"}` |
+| `POST` | `/api/v1/sites/{domain}/ip/block` | Block a source (IP or CIDR) | `{"ip": "1.2.3.4"}` |
+| `POST` | `/api/v1/sites/{domain}/ip/unblock` | Remove an allow/block rule | `{"ip": "1.2.3.4"}` |
 | `GET` | `/api/v1/sites/{domain}/ip` | List rules | |
 
 **FTP accounts:**
@@ -978,10 +1001,13 @@ Error responses:
 
 | Method | Endpoint | Description | Body |
 |--------|----------|-------------|------|
-| `GET` | `/api/v1/firewall` | Status + rules | |
+| `GET` | `/api/v1/firewall` | Status (enabled + summary) | |
+| `GET` | `/api/v1/firewall/rules` | Numbered rule list | |
 | `POST` | `/api/v1/firewall/enable` | Enable UFW | |
-| `POST` | `/api/v1/firewall/allow` | Allow port | `{"port": "3306"}` |
+| `POST` | `/api/v1/firewall/allow` | Allow port (any source) | `{"port": "3306"}` |
 | `POST` | `/api/v1/firewall/deny` | Deny port | `{"port": "3306"}` |
+| `POST` | `/api/v1/firewall/allow-from` | Whitelist a source (optionally to a port) | `{"source": "10.0.0.0/8", "port": "3306", "proto": "tcp"}` |
+| `POST` | `/api/v1/firewall/delete` | Delete a rule by number | `{"num": 3}` |
 
 **SSH keys:**
 
@@ -1032,6 +1058,10 @@ Token-based access — no API key needed for exec, the token IS the auth. Securi
 | `POST` | `/api/v1/update` | Self-update binary |
 | `POST` | `/api/v1/update/drivers` | Update driver YAMLs |
 | `GET` | `/api/v1/drivers` | List installed drivers |
+| `GET` | `/api/v1/drivers/{name}` | Get a driver's YAML (admin) |
+| `POST` | `/api/v1/drivers/validate` | Parse YAML and return a preview without saving (admin) | `{"yaml": "..."}` |
+| `POST` | `/api/v1/drivers` | Create/overwrite a custom driver (admin) | `{"name", "yaml"}` |
+| `DELETE` | `/api/v1/drivers/{name}` | Delete a custom driver; built-ins protected (admin) |
 
 ---
 
@@ -1169,11 +1199,16 @@ Every site is fully isolated. Tested against CPU miners, RAM bombs, fork bombs, 
 
 **Access control:**
 - **API auth**: SHA-256 hashed API keys, role-based (admin vs user)
-- **Ownership**: Users can only see/manage their own sites — enforced on every endpoint
-- **Rate limiting**: 60 requests/minute per IP on TCP connections (Unix socket bypasses)
+- **Ownership**: Users can only see/manage their own sites — enforced on every endpoint, including per-site IP, proxy, and FTP rules (cross-tenant access is rejected)
+- **Login lockout**: after 10 failed login attempts (password or 2FA) an account is locked for 15 minutes. Keyed on the submitted username, so the `429` response is identical for real and bogus names — no account enumeration — and resets on a successful login
+- **Rate limiting**: 60 requests/minute per IP on TCP connections (Unix socket bypasses); `/auth/login` is throttled tighter (10/min/IP)
+- **Proxied-request auth**: requests forwarded by the web proxy must always authenticate over the control socket — the local Unix socket's implicit-admin bypass never applies to them
+- **Panel hardening**: the daemon emits security headers (CSP, `X-Frame-Options`, `Referrer-Policy`, etc.) on panel responses
+- **Per-site IP allowlists**: a site with allow rules rejects all other sources at the reverse proxy (see *IP access* above)
 - **Web terminal**: Token-based (5min TTL, 100 command limit), word-boundary command filtering blocks dangerous operations and shell escapes (`$()`, backticks)
 - **Multi-user**: Linux user isolation with SFTP chroot for admin/agency users
 - **SSL**: Automatic Let's Encrypt via Traefik
+- **Supply chain**: CI workflows pin GitHub Actions to commit SHAs
 
 **Input validation:**
 - Domain names validated against strict regex (prevents container name injection)
