@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -259,9 +260,14 @@ func (s *Server) ListenSocket(socketPath string) error {
 	os.Chmod(socketPath, 0660)
 
 	log.Printf("apod daemon listening on %s", socketPath)
-	// Unix socket connections get admin access (marked by UnixSocketMiddleware)
-	handler := UnixSocketMiddleware(s.router)
-	return hardenedServer(handler).Serve(listener)
+	// Unix socket connections may get admin access (gated on the peer UID in
+	// UnixSocketMiddleware/AuthMiddleware). Expose the underlying connection via
+	// ConnContext so the middleware can read SO_PEERCRED.
+	srv := hardenedServer(UnixSocketMiddleware(s.router))
+	srv.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		return context.WithValue(ctx, ctxConnKey, c)
+	}
+	return srv.Serve(listener)
 }
 
 func (s *Server) ListenTCP(addr string) error {

@@ -3,8 +3,12 @@ package server
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aystro/apod/internal/engine"
@@ -17,7 +21,60 @@ const (
 	ctxUserKey      contextKey = "user"
 	ctxIsUnixSocket contextKey = "unix_socket"
 	ctxTokenKey     contextKey = "token_info"
+	ctxConnKey      contextKey = "net_conn"
+	ctxPeerUID      contextKey = "peer_uid"
 )
+
+// socketAdminUIDs is the set of peer UIDs allowed to inherit implicit admin over
+// the control socket. Defaults to root and the daemon's own uid (the local CLI);
+// override with APOD_SOCKET_ADMIN_UIDS="0,1000". This means a compromised, less-
+// privileged process that can reach the socket (e.g. the apod-ui container
+// running as a non-root uid) cannot claim admin merely by connecting.
+var socketAdminUIDs = loadSocketAdminUIDs()
+
+func loadSocketAdminUIDs() map[int]bool {
+	allowed := map[int]bool{0: true, os.Getuid(): true}
+	if env := os.Getenv("APOD_SOCKET_ADMIN_UIDS"); env != "" {
+		for _, p := range strings.Split(env, ",") {
+			if uid, err := strconv.Atoi(strings.TrimSpace(p)); err == nil {
+				allowed[uid] = true
+			}
+		}
+	}
+	return allowed
+}
+
+// peerUID returns the UID of the process on the other end of a Unix socket
+// connection via SO_PEERCRED.
+func peerUID(c net.Conn) (int, bool) {
+	uc, ok := c.(*net.UnixConn)
+	if !ok {
+		return -1, false
+	}
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return -1, false
+	}
+	var cred *syscall.Ucred
+	var serr error
+	if ctlErr := raw.Control(func(fd uintptr) {
+		cred, serr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	}); ctlErr != nil || serr != nil || cred == nil {
+		return -1, false
+	}
+	return int(cred.Uid), true
+}
+
+// socketPeerIsAdmin reports whether the verified peer UID for this socket
+// connection is allowed implicit admin. Fails closed: an unknown/undeterminable
+// peer never gets implicit admin (it must then present a real token).
+func socketPeerIsAdmin(r *http.Request) bool {
+	uid, ok := r.Context().Value(ctxPeerUID).(int)
+	if !ok {
+		return false
+	}
+	return socketAdminUIDs[uid]
+}
 
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,10 +122,17 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// UnixSocketMiddleware marks requests as coming from the local Unix socket (admin access)
+// UnixSocketMiddleware marks requests as coming from the local Unix socket and
+// records the verified peer UID (for the implicit-admin decision in
+// AuthMiddleware). The connection is supplied via http.Server.ConnContext.
 func UnixSocketMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), ctxIsUnixSocket, true)
+		if c, ok := r.Context().Value(ctxConnKey).(net.Conn); ok {
+			if uid, ok := peerUID(c); ok {
+				ctx = context.WithValue(ctx, ctxPeerUID, uid)
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -88,9 +152,11 @@ func isProxiedWeb(r *http.Request) bool {
 func AuthMiddleware(eng *engine.Engine) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Direct Unix socket connections (local CLI) are always admin.
-			// Requests forwarded by the web proxy must still authenticate.
-			if isUnix, _ := r.Context().Value(ctxIsUnixSocket).(bool); isUnix && !isProxiedWeb(r) {
+			// Direct Unix socket connections from an allowed local UID (the CLI)
+			// are admin. Requests forwarded by the web proxy, or from any other
+			// peer UID (e.g. a compromised non-root container holding the socket),
+			// must still authenticate with a real token.
+			if isUnix, _ := r.Context().Value(ctxIsUnixSocket).(bool); isUnix && !isProxiedWeb(r) && socketPeerIsAdmin(r) {
 				adminUser := &models.User{Name: "__admin__", Role: "admin"}
 				ctx := context.WithValue(r.Context(), ctxUserKey, adminUser)
 				next.ServeHTTP(w, r.WithContext(ctx))
