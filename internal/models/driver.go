@@ -13,6 +13,13 @@ type DriverService struct {
 	Environment   map[string]string `yaml:"environment,omitempty"`
 	Command       string            `yaml:"command,omitempty"`
 	BackendScheme string            `yaml:"backend_scheme,omitempty"`
+	// Role is the generic, stack-agnostic process type: "web" (HTTP-routed),
+	// "worker" (scalable background process), "scheduler" (background singleton),
+	// or "" for a plain single-instance backing service (db, cache, …).
+	Role string `yaml:"role,omitempty"`
+	// Replicas is the default container count for a worker role (>= 1). Ignored
+	// for non-worker roles, which are always singletons.
+	Replicas int `yaml:"replicas,omitempty"`
 }
 
 type DriverHealthcheck struct {

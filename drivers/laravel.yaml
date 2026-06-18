@@ -11,6 +11,7 @@ parameters:
 services:
   app:
     image: "webdevops/php-nginx-dev:${php_version}"
+    role: web
     volumes:
       - "${site_root}:/app"
     ports:
@@ -25,6 +26,40 @@ services:
       DB_USERNAME: "${site_db_user}"
       DB_PASSWORD: "${site_db_pass}"
       APP_URL: "https://${site_domain}"
+      APP_ENV: "production"
+
+  # Queue worker — share the app image/code, run as a background process.
+  # Scale with: apod process scale <domain> queue <n>
+  queue:
+    image: "webdevops/php-nginx-dev:${php_version}"
+    role: worker
+    replicas: 1
+    command: "php /app/artisan queue:work --sleep=3 --tries=3 --timeout=90"
+    volumes:
+      - "${site_root}:/app"
+    environment:
+      DB_CONNECTION: "mysql"
+      DB_HOST: "apod-${site_domain}-db"
+      DB_PORT: "3306"
+      DB_DATABASE: "${site_db_name}"
+      DB_USERNAME: "${site_db_user}"
+      DB_PASSWORD: "${site_db_pass}"
+      APP_ENV: "production"
+
+  # Scheduler — background singleton running Laravel's scheduler loop.
+  scheduler:
+    image: "webdevops/php-nginx-dev:${php_version}"
+    role: scheduler
+    command: "php /app/artisan schedule:work"
+    volumes:
+      - "${site_root}:/app"
+    environment:
+      DB_CONNECTION: "mysql"
+      DB_HOST: "apod-${site_domain}-db"
+      DB_PORT: "3306"
+      DB_DATABASE: "${site_db_name}"
+      DB_USERNAME: "${site_db_user}"
+      DB_PASSWORD: "${site_db_pass}"
       APP_ENV: "production"
 
   db:

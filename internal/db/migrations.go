@@ -176,6 +176,12 @@ var migrations = []struct {
 	{25, `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`},
 	{26, `ALTER TABLE users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0`},
 	{27, `ALTER TABLE users ADD COLUMN recovery_codes TEXT NOT NULL DEFAULT '[]'`},
+	{28, `CREATE TABLE IF NOT EXISTS process_scaling (
+		site_domain TEXT NOT NULL,
+		service     TEXT NOT NULL,
+		replicas    INTEGER NOT NULL,
+		PRIMARY KEY (site_domain, service)
+	)`},
 }
 
 func (d *DB) migrate() error {

@@ -156,6 +156,11 @@ func New(e *engine.Engine) *Server {
 		r.Delete("/sites/{domain}/proxy", h.RemoveProxyRuleHandler)
 
 		// IP blocking
+		// Processes (web / workers / scheduler)
+		r.Get("/sites/{domain}/processes", h.ListProcessesHandler)
+		r.Post("/sites/{domain}/processes/{service}/scale", h.ScaleProcessHandler)
+		r.Post("/sites/{domain}/processes/{service}/restart", h.RestartProcessHandler)
+
 		r.Post("/sites/{domain}/ip/allow", h.AllowIPHandler)
 		r.Post("/sites/{domain}/ip/block", h.BlockIPHandler)
 		r.Post("/sites/{domain}/ip/unblock", h.UnblockIPHandler)

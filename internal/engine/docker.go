@@ -193,6 +193,59 @@ func (d *Docker) ListContainersByLabel(ctx context.Context, label, value string)
 	return ids, nil
 }
 
+// ListContainersByLabels returns containers matching all of the given labels.
+func (d *Docker) ListContainersByLabels(ctx context.Context, labels map[string]string) ([]string, error) {
+	args := filters.NewArgs()
+	for k, v := range labels {
+		args.Add("label", k+"="+v)
+	}
+	containers, err := d.cli.ContainerList(ctx, container.ListOptions{All: true, Filters: args})
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, c := range containers {
+		ids = append(ids, c.ID)
+	}
+	return ids, nil
+}
+
+// InspectReplica reconstructs a ContainerConfig from an existing container so a
+// new replica can be created with an identical image, env, command, mounts, and
+// resource limits. Labels are returned as-is; callers override name/replica.
+func (d *Docker) InspectReplica(ctx context.Context, name string) (ContainerConfig, error) {
+	info, err := d.cli.ContainerInspect(ctx, name)
+	if err != nil {
+		return ContainerConfig{}, err
+	}
+	cfg := ContainerConfig{
+		Image:   info.Config.Image,
+		Env:     append([]string{}, info.Config.Env...),
+		Args:    append([]string{}, info.Config.Cmd...),
+		Labels:  map[string]string{},
+		Volumes: map[string]string{},
+	}
+	for k, v := range info.Config.Labels {
+		cfg.Labels[k] = v
+	}
+	if info.HostConfig != nil {
+		if info.HostConfig.Memory > 0 {
+			cfg.MemoryMB = info.HostConfig.Memory / (1024 * 1024)
+		}
+		if info.HostConfig.NanoCPUs > 0 {
+			cfg.CPUs = float64(info.HostConfig.NanoCPUs) / 1e9
+		}
+		for _, m := range info.HostConfig.Mounts {
+			target := m.Target
+			if m.ReadOnly {
+				target += ":ro"
+			}
+			cfg.Volumes[m.Source] = target
+		}
+	}
+	return cfg, nil
+}
+
 func (d *Docker) EnsureNetwork(ctx context.Context, name string) error {
 	_, err := d.cli.NetworkInspect(ctx, name, network.InspectOptions{})
 	if err == nil {

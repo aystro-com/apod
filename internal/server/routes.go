@@ -1104,6 +1104,53 @@ func (h *Handler) RemoveProxyRuleHandler(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
+// Processes (web / workers / scheduler)
+func (h *Handler) ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	procs, err := h.engine.ListProcesses(r.Context(), domain)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, procs)
+}
+
+func (h *Handler) ScaleProcessHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	service := chi.URLParam(r, "service")
+	var req struct {
+		Replicas int `json:"replicas"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.ScaleProcess(r.Context(), domain, service, req.Replicas); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"status": "scaled", "service": service, "replicas": req.Replicas})
+}
+
+func (h *Handler) RestartProcessHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	service := chi.URLParam(r, "service")
+	if err := h.engine.RestartProcess(r.Context(), domain, service); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "restarted", "service": service})
+}
+
 // IP allow/block (per site)
 func (h *Handler) AllowIPHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")

@@ -333,8 +333,6 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	cpus, _ := strconv.ParseFloat(site.CPU, 64)
 
 	for svcName, svc := range driver.Services {
-		containerName := fmt.Sprintf("apod-%s-%s", opts.Domain, svcName)
-
 		if err := e.docker.PullImage(ctx, svc.Image); err != nil {
 			e.db.UpdateSiteStatus(opts.Domain, "error")
 			return fmt.Errorf("pull image %s: %w", svc.Image, err)
@@ -361,46 +359,59 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 			}
 		}
 
-		labels := map[string]string{
-			labelPrefix + "site":    opts.Domain,
-			labelPrefix + "service": svcName,
-			labelPrefix + "managed": "true",
-		}
-		if svcName == "app" && len(svc.Ports) > 0 {
-			port := svc.Ports[0]
-			traefikLabels := TraefikLabels(opts.Domain, []string{opts.Domain}, port, svc.BackendScheme, e.tls.CertResolver())
-			// Tell Traefik to use the site-specific network to reach this container
-			routerName := strings.ReplaceAll(opts.Domain, ".", "-")
-			traefikLabels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", routerName)] = port
-			for k, v := range traefikLabels {
-				labels[k] = v
+		role := effectiveRole(svcName, svc.Role)
+		isWeb := role == roleWeb && len(svc.Ports) > 0
+		replicas := e.desiredReplicasFor(opts.Domain, svcName, svc)
+
+		// A service runs as one or more replica containers. Web/scheduler/plain
+		// services are singletons; workers may run several (or zero).
+		for idx := 0; idx < replicas; idx++ {
+			containerName := replicaContainerName(opts.Domain, svcName, idx)
+
+			labels := map[string]string{
+				labelPrefix + "site":    opts.Domain,
+				labelPrefix + "service": svcName,
+				labelPrefix + "role":    role,
+				labelPrefix + "replica": strconv.Itoa(idx),
+				labelPrefix + "managed": "true",
 			}
-		}
+			// Only the (singleton) web process is published through Traefik.
+			if isWeb {
+				port := svc.Ports[0]
+				traefikLabels := TraefikLabels(opts.Domain, []string{opts.Domain}, port, svc.BackendScheme, e.tls.CertResolver())
+				// Tell Traefik to use the site-specific network to reach this container
+				routerName := strings.ReplaceAll(opts.Domain, ".", "-")
+				traefikLabels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", routerName)] = port
+				for k, v := range traefikLabels {
+					labels[k] = v
+				}
+			}
 
-		id, err := e.docker.CreateContainer(ctx, ContainerConfig{
-			Name:     containerName,
-			Image:    svc.Image,
-			Env:      env,
-			Volumes:  volumes,
-			Labels:   labels,
-			MemoryMB: memoryMB,
-			CPUs:     cpus,
-			Command:  svc.Command,
-		})
-		if err != nil {
-			e.db.UpdateSiteStatus(opts.Domain, "error")
-			return fmt.Errorf("create container %s: %w", containerName, err)
-		}
+			id, err := e.docker.CreateContainer(ctx, ContainerConfig{
+				Name:     containerName,
+				Image:    svc.Image,
+				Env:      env,
+				Volumes:  volumes,
+				Labels:   labels,
+				MemoryMB: memoryMB,
+				CPUs:     cpus,
+				Command:  svc.Command,
+			})
+			if err != nil {
+				e.db.UpdateSiteStatus(opts.Domain, "error")
+				return fmt.Errorf("create container %s: %w", containerName, err)
+			}
 
-		// Connect to site-specific isolated network (not the shared apod-net)
-		if err := e.docker.ConnectNetwork(ctx, siteNetwork, id); err != nil {
-			e.db.UpdateSiteStatus(opts.Domain, "error")
-			return fmt.Errorf("connect container to network: %w", err)
-		}
+			// Connect to site-specific isolated network (not the shared apod-net)
+			if err := e.docker.ConnectNetwork(ctx, siteNetwork, id); err != nil {
+				e.db.UpdateSiteStatus(opts.Domain, "error")
+				return fmt.Errorf("connect container to network: %w", err)
+			}
 
-		if err := e.docker.StartContainer(ctx, id); err != nil {
-			e.db.UpdateSiteStatus(opts.Domain, "error")
-			return fmt.Errorf("start container %s: %w", containerName, err)
+			if err := e.docker.StartContainer(ctx, id); err != nil {
+				e.db.UpdateSiteStatus(opts.Domain, "error")
+				return fmt.Errorf("start container %s: %w", containerName, err)
+			}
 		}
 	}
 
@@ -503,6 +514,9 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 
 	// Remove the site's IP allowlist middleware file.
 	os.Remove(filepath.Join(traefikDynamicDir, ipAllowMiddlewareName(domain)+".toml"))
+
+	// Drop any per-service scaling overrides.
+	e.db.DeleteProcessScaling(domain)
 
 	if purge {
 		siteDir := filepath.Join(e.dataDir, "sites", domain)
