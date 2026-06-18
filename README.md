@@ -1059,8 +1059,8 @@ Token-based access — no API key needed for exec, the token IS the auth. Securi
 | `POST` | `/api/v1/update/drivers` | Update driver YAMLs |
 | `GET` | `/api/v1/drivers` | List installed drivers |
 | `GET` | `/api/v1/drivers/{name}` | Get a driver's YAML (admin) |
-| `POST` | `/api/v1/drivers/validate` | Parse YAML and return a preview without saving (admin) | `{"yaml": "..."}` |
-| `POST` | `/api/v1/drivers` | Create/overwrite a custom driver (admin) | `{"name", "yaml"}` |
+| `POST` | `/api/v1/drivers/validate` | Parse YAML and return a preview without saving — body `{"yaml"}` (admin) |
+| `POST` | `/api/v1/drivers` | Create/overwrite a custom driver — body `{"name", "yaml"}` (admin) |
 | `DELETE` | `/api/v1/drivers/{name}` | Delete a custom driver; built-ins protected (admin) |
 
 ---
