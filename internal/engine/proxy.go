@@ -56,6 +56,22 @@ func normalizeSSHPublicKey(raw string) (string, error) {
 }
 
 func (e *Engine) AddProxyRule(ctx context.Context, domain, ruleType string, config map[string]string) (int64, error) {
+	// Validate the rule so we never persist an empty no-op rule.
+	required := map[string][]string{
+		"redirect":   {"from", "to"},
+		"header":     {"name", "value"},
+		"basic-auth": {"user", "password"},
+	}
+	keys, ok := required[ruleType]
+	if !ok {
+		return 0, Invalid("invalid proxy rule type %q: must be redirect, header, or basic-auth", ruleType)
+	}
+	for _, k := range keys {
+		if strings.TrimSpace(config[k]) == "" {
+			return 0, Invalid("proxy rule %q requires %q", ruleType, k)
+		}
+	}
+
 	configJSON, _ := json.Marshal(config)
 	id, err := e.db.CreateProxyRule(domain, ruleType, string(configJSON))
 	if err != nil {
