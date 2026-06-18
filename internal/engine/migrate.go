@@ -325,7 +325,10 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 		skipDataDirs = dbVolumeDirs(drv)
 	}
 
-	// Extract files and data
+	// Extract files and data. Cap the total bytes written so a malicious upload
+	// can't fill the disk via a decompression bomb (imports are reachable by
+	// non-admin users), mirroring RestoreBackup.
+	var written int64
 	for _, f := range zr.File {
 		if strings.HasPrefix(f.Name, "files/") {
 			relPath := strings.TrimPrefix(f.Name, "files/")
@@ -336,12 +339,11 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(siteRoot)+string(filepath.Separator)) {
 				continue
 			}
-			os.MkdirAll(filepath.Dir(destPath), 0755)
-			rc, _ := f.Open()
-			dest, _ := os.Create(destPath)
-			io.Copy(dest, rc)
-			dest.Close()
-			rc.Close()
+			n, _ := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
+			written += n
+			if written > maxRestoreTotalBytes {
+				return Invalid("import aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
+			}
 		}
 		if strings.HasPrefix(f.Name, "data/") {
 			relPath := strings.TrimPrefix(f.Name, "data/")
@@ -360,12 +362,11 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(dataRoot)+string(filepath.Separator)) {
 				continue
 			}
-			os.MkdirAll(filepath.Dir(destPath), 0755)
-			rc, _ := f.Open()
-			dest, _ := os.Create(destPath)
-			io.Copy(dest, rc)
-			dest.Close()
-			rc.Close()
+			n, _ := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
+			written += n
+			if written > maxRestoreTotalBytes {
+				return Invalid("import aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
+			}
 		}
 	}
 
@@ -382,31 +383,13 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 		dbUser := dbName
 
 		for _, dbCfg := range driver.Backup.Databases {
-			dumpPrefix := fmt.Sprintf("databases/%s_%s.sql", dbCfg.Service, dbCfg.Type)
-			for _, f := range zr.File {
-				if !strings.HasPrefix(f.Name, dumpPrefix) {
-					continue
-				}
-
-				rc, _ := f.Open()
-				var dump []byte
-				if strings.HasSuffix(f.Name, ".gz") {
-					gz, err := gzip.NewReader(rc)
-					if err == nil {
-						dump, _ = io.ReadAll(gz)
-						gz.Close()
-					}
-				} else {
-					dump, _ = io.ReadAll(rc)
-				}
-				rc.Close()
-
-				if len(dump) == 0 {
-					continue
-				}
-				e.restoreDatabase(ctx, domain, site.Owner, dbCfg.Service, dbCfg.Type, dbName, dbUser, isCompose, dump)
-				break
+			// readDumpFromZip caps the decompressed size, guarding against a
+			// gzip bomb in the uploaded archive.
+			dump := readDumpFromZip(zr, dbCfg.Service, dbCfg.Type)
+			if len(dump) == 0 {
+				continue
 			}
+			e.restoreDatabase(ctx, domain, site.Owner, dbCfg.Service, dbCfg.Type, dbName, dbUser, isCompose, dump)
 		}
 	}
 

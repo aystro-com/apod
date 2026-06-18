@@ -69,7 +69,9 @@ func readDumpFromZip(zr *zip.Reader, service, dbType string) []byte {
 			defer gz.Close()
 			reader = gz
 		}
-		data, _ := io.ReadAll(reader)
+		// Cap the decompressed size so a gzip bomb in the dump entry can't
+		// exhaust memory (restore/import are reachable by non-admin users).
+		data, _ := io.ReadAll(io.LimitReader(reader, maxRestoreTotalBytes))
 		return data
 	}
 	return nil
