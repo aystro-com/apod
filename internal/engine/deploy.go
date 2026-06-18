@@ -91,7 +91,7 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 	}
 
 	// Run before_deploy hooks
-	containerName := fmt.Sprintf("apod-%s-app", domain)
+	containerName := containerNameFor(domain, primaryServiceName(driver))
 	for _, hook := range driver.Deploy.BeforeDeploy {
 		_, err := e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", hook})
 		if err != nil {

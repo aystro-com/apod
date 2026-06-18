@@ -107,7 +107,7 @@ func cleanExpiredTokens() {
 // For compose sites: finds the container with apod.shell=true label, or falls back to first labeled container.
 func (e *Engine) ExecInSite(ctx context.Context, domain, command string) (string, error) {
 	// Try normal container first
-	containerName := fmt.Sprintf("apod-%s-app", domain)
+	containerName := e.primaryServiceContainer(domain)
 	if exists, _ := e.docker.ContainerExists(ctx, containerName); !exists {
 		// Compose site: find shell container by label
 		shellIDs, _ := e.docker.ListContainersByLabel(ctx, "apod.shell", "true")

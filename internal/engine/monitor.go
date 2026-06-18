@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 
 	"github.com/docker/docker/api/types/container"
@@ -34,7 +33,7 @@ func (e *Engine) GetSiteStats(ctx context.Context, domain string) (*SiteStats, e
 	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	if len(ids) == 0 {
 		// Fallback: try the old-style container name
-		containerName := fmt.Sprintf("apod-%s-app", domain)
+		containerName := e.primaryServiceContainer(domain)
 		if exists, _ := e.docker.ContainerExists(ctx, containerName); exists {
 			ids = []string{containerName}
 		}

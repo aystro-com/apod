@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+
 	"fmt"
+	"github.com/aystro/apod/internal/models"
 )
 
 // This file unifies "run a command in a site's service" across the two runtimes
@@ -13,6 +15,39 @@ import (
 // containerNameFor returns the native container name for a site service.
 func containerNameFor(domain, service string) string {
 	return fmt.Sprintf("apod-%s-%s", domain, service)
+}
+
+// primaryServiceName returns a site's primary (web/HTTP) service — the one that
+// deploy hooks, logs, the terminal and monitoring target. It is the web-role
+// service (which includes a service literally named "app" with no role), and
+// falls back to the first service by name so the result is deterministic. This
+// keeps those operations stack-agnostic instead of assuming a service called
+// "app".
+func primaryServiceName(driver *models.Driver) string {
+	first := ""
+	for name, svc := range driver.Services {
+		if effectiveRole(name, svc.Role) == roleWeb {
+			return name
+		}
+		if first == "" || name < first {
+			first = name
+		}
+	}
+	return first
+}
+
+// primaryServiceContainer returns the native container name of a site's primary
+// service, loading the driver to find it (falling back to "app").
+func (e *Engine) primaryServiceContainer(domain string) string {
+	name := "app"
+	if site, err := e.db.GetSite(domain); err == nil && site != nil {
+		if driver, derr := e.drivers.Load(site.Driver); derr == nil {
+			if p := primaryServiceName(driver); p != "" {
+				name = p
+			}
+		}
+	}
+	return containerNameFor(domain, name)
 }
 
 // siteCapture runs cmd in a site's service container and returns stdout only —

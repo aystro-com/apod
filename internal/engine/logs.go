@@ -9,7 +9,7 @@ import (
 )
 
 func (e *Engine) GetContainerLogs(ctx context.Context, domain string, lines int) (string, error) {
-	containerName := fmt.Sprintf("apod-%s-app", domain)
+	containerName := e.primaryServiceContainer(domain)
 
 	tail := "100"
 	if lines > 0 {
