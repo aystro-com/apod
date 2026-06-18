@@ -788,6 +788,22 @@ func (h *Handler) DeployHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deployed"})
 }
 
+// UpdateSiteHandler pulls the latest image(s) for a site and recreates its
+// containers. The engine detaches from the request context internally, so the
+// update completes even if the panel updates its own domain (dropping this
+// connection). Progress streams over the deploy/events SSE channel.
+func (h *Handler) UpdateSiteHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	if err := h.engine.UpdateSite(r.Context(), domain); err != nil {
+		respondEngineError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
 func (h *Handler) RollbackHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
 	if !h.checkSiteAccess(w, r, domain) {

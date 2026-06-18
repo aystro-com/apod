@@ -9,10 +9,23 @@ import (
 )
 
 var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Update apod to latest version",
+	Use:   "update [domain]",
+	Short: "Update apod, or a site's images to latest (apod update <domain>)",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
+
+		// With a domain, update that site's images (pull latest + recreate)
+		// instead of the apod binary itself.
+		if len(args) == 1 {
+			domain := args[0]
+			fmt.Printf("Updating %s to latest images...\n", domain)
+			if _, err := client.Post("/api/v1/sites/"+domain+"/update", nil); err != nil {
+				return err
+			}
+			fmt.Printf("%s updated to latest.\n", domain)
+			return nil
+		}
 
 		// Check first
 		resp, err := client.Get("/api/v1/update/check")

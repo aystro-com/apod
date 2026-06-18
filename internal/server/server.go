@@ -113,6 +113,7 @@ func New(e *engine.Engine) *Server {
 
 		// Deploy
 		r.Post("/sites/{domain}/deploy", h.DeployHandler)
+		r.Post("/sites/{domain}/update", h.UpdateSiteHandler)
 		r.Post("/sites/{domain}/rollback", h.RollbackHandler)
 		r.Get("/sites/{domain}/deployments", h.ListDeploymentsHandler)
 
