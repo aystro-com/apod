@@ -160,6 +160,33 @@ func TestImageRepoName(t *testing.T) {
 	}
 }
 
+func TestIsOfficialDBImage(t *testing.T) {
+	official := []string{
+		"mysql", "mysql:8.0", "mariadb", "postgres:16-alpine",
+		"library/redis", "docker.io/library/mongo:7", "index.docker.io/library/mysql",
+	}
+	for _, img := range official {
+		if !isOfficialDBImage(img) {
+			t.Errorf("isOfficialDBImage(%q) = false, want true", img)
+		}
+	}
+	// Third-party registry/namespace whose basename is a db name must NOT be
+	// exempted from no-new-privileges.
+	hostile := []string{
+		"evil.io/x/mysql", "evil.io/x/mysql:8", "attacker/postgres",
+		"attacker/mysql@sha256:dead", "registry.example.com:5000/team/redis",
+		"evil-mysql", "mysql-evil", "notadb",
+	}
+	for _, img := range hostile {
+		if isOfficialDBImage(img) {
+			t.Errorf("isOfficialDBImage(%q) = true, want false (exemption bypass)", img)
+		}
+		if containerSecurityOpt(img) == nil {
+			t.Errorf("no-new-privileges wrongly disabled for %q", img)
+		}
+	}
+}
+
 func TestValidateIPRule(t *testing.T) {
 	for _, ip := range []string{"1.2.3.4", "10.0.0.0/8", "::1", "2001:db8::/32"} {
 		if err := validateIPRule(ip); err != nil {

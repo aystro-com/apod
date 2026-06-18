@@ -401,6 +401,15 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		for _, v := range svc.Volumes {
 			parts := strings.SplitN(v, ":", 2)
 			if len(parts) == 2 {
+				// Refuse bind mounts of sensitive host paths (docker.sock, /etc,
+				// /proc, …). Native drivers are admin-authored, but this closes
+				// the gap where a careless/imported driver could hand a container
+				// host root. The apod control-socket dir is the one intentional
+				// exception (the apod-ui panel proxies the API through it).
+				if err := validateNativeHostMount(parts[0]); err != nil {
+					e.db.UpdateSiteStatus(opts.Domain, "error")
+					return err
+				}
 				volumes[parts[0]] = parts[1]
 				// Create the host directory for bind mounts — but don't clobber a
 				// path that already exists as a non-directory, e.g. a bind-mounted

@@ -153,27 +153,34 @@ func validateComposeSecurity(composeFile string) error {
 		return fmt.Errorf("parse compose: %w", err)
 	}
 
+	compDir := filepath.Dir(composeFile)
 	for name, svc := range compose.Services {
 		if svc.Privileged {
 			return fmt.Errorf("service %q: privileged mode is not allowed", name)
 		}
+		// Allowlist: only capabilities Docker already grants by default may be
+		// added (adding them is a no-op). Anything else — DAC_READ_SEARCH,
+		// SYS_ADMIN, SYS_PTRACE, BPF, … — is an escalation and is rejected.
 		for _, c := range svc.CapAdd {
-			uc := strings.ToUpper(strings.TrimSpace(c))
-			if uc == "ALL" || uc == "SYS_ADMIN" || uc == "SYS_PTRACE" || uc == "SYS_MODULE" || uc == "NET_ADMIN" {
+			uc := strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(c)), "CAP_")))
+			if !defaultDockerCaps[uc] {
 				return fmt.Errorf("service %q: cap_add %q is not allowed", name, c)
 			}
 		}
 		if len(svc.Devices) > 0 {
 			return fmt.Errorf("service %q: host device passthrough is not allowed", name)
 		}
-		if isHostNamespace(svc.Pid) {
-			return fmt.Errorf("service %q: pid: host is not allowed", name)
+		// Reject host namespaces AND joining another container's/service's
+		// namespace (pid/ipc/network "container:..."/"service:..."), which would
+		// let a tenant peer into Traefik or another tenant's container.
+		if err := checkComposeNamespace(name, "pid", svc.Pid); err != nil {
+			return err
 		}
-		if isHostNamespace(svc.Ipc) {
-			return fmt.Errorf("service %q: ipc: host is not allowed", name)
+		if err := checkComposeNamespace(name, "ipc", svc.Ipc); err != nil {
+			return err
 		}
-		if isHostNamespace(svc.NetworkMode) {
-			return fmt.Errorf("service %q: network_mode: host is not allowed", name)
+		if err := checkComposeNamespace(name, "network_mode", svc.NetworkMode); err != nil {
+			return err
 		}
 		if isHostNamespace(svc.UsernsMode) {
 			return fmt.Errorf("service %q: userns_mode: host is not allowed", name)
@@ -185,7 +192,7 @@ func validateComposeSecurity(composeFile string) error {
 			}
 		}
 		for _, v := range svc.Volumes {
-			if err := checkComposeVolume(name, v); err != nil {
+			if err := checkComposeVolume(name, compDir, v); err != nil {
 				return err
 			}
 		}
@@ -193,9 +200,32 @@ func validateComposeSecurity(composeFile string) error {
 	return nil
 }
 
+// defaultDockerCaps is the set of Linux capabilities Docker grants a container
+// by default (without --privileged). Adding any of these via cap_add is a no-op;
+// anything outside the set is a privilege escalation we refuse.
+var defaultDockerCaps = map[string]bool{
+	"CHOWN": true, "DAC_OVERRIDE": true, "FSETID": true, "FOWNER": true,
+	"MKNOD": true, "NET_RAW": true, "SETGID": true, "SETUID": true,
+	"SETFCAP": true, "SETPCAP": true, "NET_BIND_SERVICE": true,
+	"SYS_CHROOT": true, "KILL": true, "AUDIT_WRITE": true,
+}
+
 func isHostNamespace(v string) bool {
 	v = strings.ToLower(strings.TrimSpace(strings.Trim(v, "\"'")))
 	return v == "host" || strings.HasPrefix(v, "host:")
+}
+
+// checkComposeNamespace rejects sharing a host namespace or joining another
+// container's/service's namespace for pid/ipc/network_mode.
+func checkComposeNamespace(service, field, v string) error {
+	lv := strings.ToLower(strings.TrimSpace(strings.Trim(v, "\"'")))
+	if isHostNamespace(lv) {
+		return fmt.Errorf("service %q: %s: host is not allowed", service, field)
+	}
+	if strings.HasPrefix(lv, "container:") || strings.HasPrefix(lv, "service:") {
+		return fmt.Errorf("service %q: %s joining another container/service namespace is not allowed", service, field)
+	}
+	return nil
 }
 
 // dangerousMountSources are host paths that must never be bind-mounted into a
@@ -206,7 +236,41 @@ var dangerousMountSources = []string{
 	"/var/lib/docker", "/home",
 }
 
-func checkComposeVolume(service string, node yaml.Node) error {
+// apodControlSocketDir is the one host path a (native, admin-authored) driver is
+// allowed to mount despite being under /run: the apod-ui panel proxies the API
+// through the daemon control socket that lives here.
+const apodControlSocketDir = "/run/apod"
+
+// nativeDangerousMounts is the blocklist for native (admin-authored) driver
+// volumes. It omits /home — native site data legitimately lives under
+// /home/<owner>/sites/… — but keeps every container-escape / host-tamper path.
+var nativeDangerousMounts = []string{
+	"/var/run/docker.sock", "/run/docker.sock", "/var/run", "/run",
+	"/", "/etc", "/root", "/proc", "/sys", "/boot", "/dev", "/var/lib/docker",
+}
+
+// validateNativeHostMount applies the dangerous-mount blocklist to a native
+// driver's bind-mount source. Unlike tenant compose, native drivers may mount
+// the apod control-socket dir (the panel needs it) and paths under /home.
+// Relative/named sources are allowed.
+func validateNativeHostMount(source string) error {
+	source = strings.TrimSpace(source)
+	if !strings.HasPrefix(source, "/") {
+		return nil // named volume or relative path
+	}
+	clean := filepath.Clean(source)
+	if clean == apodControlSocketDir || strings.HasPrefix(clean, apodControlSocketDir+"/") {
+		return nil
+	}
+	for _, bad := range nativeDangerousMounts {
+		if clean == bad || strings.HasPrefix(clean, bad+"/") {
+			return Invalid("bind mount of host path %q is not allowed", source)
+		}
+	}
+	return nil
+}
+
+func checkComposeVolume(service, compDir string, node yaml.Node) error {
 	var source string
 	switch node.Kind {
 	case yaml.ScalarNode:
@@ -223,11 +287,24 @@ func checkComposeVolume(service string, node yaml.Node) error {
 		}
 	}
 	source = strings.TrimSpace(source)
-	if source == "" || !strings.HasPrefix(source, "/") {
-		// Named volumes and relative paths are fine.
+	if source == "" {
 		return nil
 	}
+	// A named volume (no slash, not "./" or "../") is fine.
+	if !strings.HasPrefix(source, "/") && !strings.HasPrefix(source, ".") {
+		return nil
+	}
+	// Resolve relative bind mounts against the compose project dir the way Docker
+	// does, so "../../../var/run/docker.sock" can't slip past an absolute-only
+	// blocklist. Reject anything that escapes the project dir entirely.
 	clean := filepath.Clean(source)
+	if !strings.HasPrefix(source, "/") {
+		abs := filepath.Clean(filepath.Join(compDir, source))
+		if abs != compDir && !strings.HasPrefix(abs, compDir+string(filepath.Separator)) {
+			return fmt.Errorf("service %q: relative bind mount %q escapes the project directory", service, source)
+		}
+		clean = abs
+	}
 	for _, bad := range dangerousMountSources {
 		if clean == bad || strings.HasPrefix(clean, bad+"/") {
 			return fmt.Errorf("service %q: bind mount of host path %q is not allowed", service, source)

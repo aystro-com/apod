@@ -464,14 +464,42 @@ var dbImageRepos = map[string]bool{
 }
 
 // containerSecurityOpt returns security options for a container. The exemption
-// is keyed off the image's exact repository name (not a substring match) so a
-// driver cannot disable no-new-privileges merely by embedding "mysql" etc. in
-// an arbitrary image name like "attacker/evil-mysql".
+// is keyed off the image's fully-qualified official repository (docker.io
+// library namespace only), so a hostile image from a third-party registry or
+// namespace whose basename happens to be "mysql" (e.g. "evil.io/x/mysql") does
+// NOT inherit the no-new-privileges exemption.
 func containerSecurityOpt(image string) []string {
-	if dbImageRepos[imageRepoName(image)] {
+	if isOfficialDBImage(image) {
 		return nil // no security opts for official database containers
 	}
 	return []string{"no-new-privileges:true"}
+}
+
+// isOfficialDBImage reports whether image is one of the official Docker Hub
+// library database images (optionally with a tag/digest), and nothing else. It
+// rejects any third-party registry or namespace so the no-new-privileges
+// exemption can't be claimed by an attacker-controlled image.
+func isOfficialDBImage(image string) bool {
+	ref := strings.ToLower(strings.TrimSpace(image))
+	if i := strings.IndexByte(ref, '@'); i >= 0 { // strip digest
+		ref = ref[:i]
+	}
+	parts := strings.Split(ref, "/")
+	// Strip a :tag from the final path segment only (not a registry :port).
+	last := parts[len(parts)-1]
+	if i := strings.IndexByte(last, ':'); i >= 0 {
+		parts[len(parts)-1] = last[:i]
+	}
+	switch len(parts) {
+	case 1: // "mysql"
+		return dbImageRepos[parts[0]]
+	case 2: // only the implicit library namespace, "library/mysql"
+		return parts[0] == "library" && dbImageRepos[parts[1]]
+	case 3: // "docker.io/library/mysql" / "index.docker.io/library/mysql"
+		return (parts[0] == "docker.io" || parts[0] == "index.docker.io") &&
+			parts[1] == "library" && dbImageRepos[parts[2]]
+	}
+	return false
 }
 
 // imageRepoName extracts the bare repository name from an image reference,
