@@ -8,6 +8,17 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
+)
+
+// webhookDeployCooldown collapses rapid repeat webhook deploys for a domain
+// (replay or flooding) into one, bounding deploy churn beyond the IP rate limit.
+const webhookDeployCooldown = 10 * time.Second
+
+var (
+	webhookDeployMu   sync.Mutex
+	webhookLastDeploy = map[string]time.Time{}
 )
 
 func (e *Engine) CreateWebhook(ctx context.Context, domain string) (string, error) {
@@ -45,6 +56,16 @@ func (e *Engine) HandleWebhook(ctx context.Context, token string, body []byte, s
 			return fmt.Errorf("invalid webhook signature")
 		}
 	}
+
+	// Collapse rapid repeats (replay/flood) into a single deploy.
+	webhookDeployMu.Lock()
+	if now := time.Now(); now.Sub(webhookLastDeploy[wh.SiteDomain]) < webhookDeployCooldown {
+		webhookDeployMu.Unlock()
+		return nil // acknowledged, but skipped — too soon since the last deploy
+	} else {
+		webhookLastDeploy[wh.SiteDomain] = now
+	}
+	webhookDeployMu.Unlock()
 
 	return e.Deploy(ctx, wh.SiteDomain, "")
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aystro/apod/internal/engine"
@@ -25,11 +26,60 @@ const maxDeployStreamDuration = 15 * time.Minute
 // a user can only watch deployments for sites they own (admins, all sites). The
 // connection is bounded in time, ends on the terminal event, and is torn down
 // when the client disconnects.
+// SSE stream concurrency limits — each open stream holds a goroutine and a
+// subscription, so cap how many a single user (and the whole daemon) can hold to
+// stop a client from exhausting resources by opening many streams.
+const (
+	maxSSEPerUser = 8
+	maxSSEGlobal  = 512
+)
+
+var (
+	sseMu      sync.Mutex
+	sseGlobal  int
+	ssePerUser = map[string]int{}
+)
+
+func acquireSSE(user string) bool {
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	if sseGlobal >= maxSSEGlobal || ssePerUser[user] >= maxSSEPerUser {
+		return false
+	}
+	sseGlobal++
+	ssePerUser[user]++
+	return true
+}
+
+func releaseSSE(user string) {
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	if sseGlobal > 0 {
+		sseGlobal--
+	}
+	if ssePerUser[user] <= 1 {
+		delete(ssePerUser, user)
+	} else {
+		ssePerUser[user]--
+	}
+}
+
 func (h *Handler) DeployEvents(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
 	if !h.checkSiteAccess(w, r, domain) {
 		return // checkSiteAccess already wrote 403/404
 	}
+
+	// Bound concurrent streams per user and globally.
+	streamUser := "local"
+	if u := UserFromContext(r.Context()); u != nil {
+		streamUser = u.Name
+	}
+	if !acquireSSE(streamUser) {
+		respondError(w, http.StatusTooManyRequests, "too many open event streams")
+		return
+	}
+	defer releaseSSE(streamUser)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

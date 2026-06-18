@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 var (
 	flagListen      string
 	flagTLS         bool
+	flagInsecure    bool
 	flagTLSCert     string
 	flagTLSKey      string
 	flagDBPath      string
@@ -24,6 +26,25 @@ var (
 	flagTLSMode     string
 	flagDNSProvider string
 )
+
+// isLoopbackListen reports whether a listen address binds only the loopback
+// interface (safe for a plaintext, proxy-fronted deployment).
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false // ":8443" binds all interfaces
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
@@ -61,6 +82,11 @@ var serverCmd = &cobra.Command{
 				}
 				return srv.ListenTCPTLS(flagListen, flagTLSCert, flagTLSKey)
 			}
+			// Plaintext over a non-loopback address would send API keys in the
+			// clear. Require an explicit opt-in; loopback (proxy-fronted) is fine.
+			if !flagInsecure && !isLoopbackListen(flagListen) {
+				return fmt.Errorf("refusing to serve plaintext HTTP on non-loopback address %q: use --tls, bind to 127.0.0.1 behind a TLS proxy, or pass --insecure to override", flagListen)
+			}
 			log.Printf("WARNING: serving the API over plaintext HTTP on %s — terminate TLS at a trusted proxy or pass --tls with --tls-cert/--tls-key", flagListen)
 			return srv.ListenTCP(flagListen)
 		}
@@ -71,6 +97,7 @@ var serverCmd = &cobra.Command{
 func init() {
 	serverCmd.Flags().StringVar(&flagListen, "listen", "", "TCP address to listen on (e.g. 0.0.0.0:8443)")
 	serverCmd.Flags().BoolVar(&flagTLS, "tls", false, "Serve the TCP listener over HTTPS (requires --tls-cert and --tls-key)")
+	serverCmd.Flags().BoolVar(&flagInsecure, "insecure", false, "Allow plaintext HTTP on a non-loopback address (sends API keys in cleartext)")
 	serverCmd.Flags().StringVar(&flagTLSCert, "tls-cert", "", "Path to TLS certificate file (PEM) for --tls")
 	serverCmd.Flags().StringVar(&flagTLSKey, "tls-key", "", "Path to TLS private key file (PEM) for --tls")
 	serverCmd.Flags().StringVar(&flagDBPath, "db", "", "Database path (default /etc/apod/apod.db)")

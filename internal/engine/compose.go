@@ -139,6 +139,7 @@ func validateComposeSecurity(composeFile string) error {
 
 	var compose struct {
 		Services map[string]struct {
+			Image       string      `yaml:"image"`
 			Privileged  bool        `yaml:"privileged"`
 			CapAdd      []string    `yaml:"cap_add"`
 			Devices     []any       `yaml:"devices"`
@@ -156,6 +157,9 @@ func validateComposeSecurity(composeFile string) error {
 
 	compDir := filepath.Dir(composeFile)
 	for name, svc := range compose.Services {
+		if !imageAllowed(svc.Image) {
+			return fmt.Errorf("service %q: image %q is not from an allowed registry", name, svc.Image)
+		}
 		if svc.Privileged {
 			return fmt.Errorf("service %q: privileged mode is not allowed", name)
 		}
@@ -199,6 +203,27 @@ func validateComposeSecurity(composeFile string) error {
 		}
 	}
 	return nil
+}
+
+// allowedImagePrefixes is an OPTIONAL registry/repo allowlist for tenant-
+// supplied compose images, set via APOD_ALLOWED_REGISTRIES (comma/space
+// separated prefixes, e.g. "docker.io/library/,ghcr.io/aystro-com/"). Empty
+// (the default) allows any image, preserving the run-anything behavior.
+var allowedImagePrefixes = strings.Fields(strings.ReplaceAll(os.Getenv("APOD_ALLOWED_REGISTRIES"), ",", " "))
+
+// imageAllowed reports whether an image reference is permitted. Always true when
+// no allowlist is configured.
+func imageAllowed(image string) bool {
+	if len(allowedImagePrefixes) == 0 {
+		return true
+	}
+	img := strings.ToLower(strings.TrimSpace(image))
+	for _, p := range allowedImagePrefixes {
+		if strings.HasPrefix(img, strings.ToLower(p)) {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultDockerCaps is the set of Linux capabilities Docker grants a container
