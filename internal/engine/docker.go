@@ -227,6 +227,34 @@ func (d *Docker) ListContainersByLabels(ctx context.Context, labels map[string]s
 	return ids, nil
 }
 
+// SiteContainer describes one of a site's containers, identified by its apod
+// labels. Used to render compose-managed sites, whose process model lives in
+// the running containers rather than a driver's services map.
+type SiteContainer struct {
+	Service string
+	Image   string
+	Running bool
+}
+
+// ListSiteContainers returns every container labelled for the given site.
+func (d *Docker) ListSiteContainers(ctx context.Context, domain string) ([]SiteContainer, error) {
+	args := filters.NewArgs()
+	args.Add("label", labelPrefix+"site="+domain)
+	containers, err := d.cli.ContainerList(ctx, container.ListOptions{All: true, Filters: args})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SiteContainer, 0, len(containers))
+	for _, c := range containers {
+		out = append(out, SiteContainer{
+			Service: c.Labels[labelPrefix+"service"],
+			Image:   c.Image,
+			Running: c.State == "running",
+		})
+	}
+	return out, nil
+}
+
 // InspectReplica reconstructs a ContainerConfig from an existing container so a
 // new replica can be created with an identical image, env, command, mounts, and
 // resource limits. Labels are returned as-is; callers override name/replica.

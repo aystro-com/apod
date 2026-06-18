@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -100,6 +101,13 @@ func (e *Engine) ListProcesses(ctx context.Context, domain string) ([]ProcessInf
 		return nil, err
 	}
 
+	// Compose sites have no driver.Services map — their process model lives in
+	// the actual containers. List those so the architecture view shows the real
+	// running containers instead of empty placeholders.
+	if driver.Type == "compose" {
+		return e.composeProcesses(ctx, domain, driver)
+	}
+
 	overrides, err := e.db.ListProcessScaling(domain)
 	if err != nil {
 		return nil, err
@@ -130,6 +138,68 @@ func (e *Engine) ListProcesses(ctx context.Context, domain string) ([]ProcessInf
 		})
 	}
 	return out, nil
+}
+
+// composeProcesses builds the process list for a compose-managed site from its
+// actual containers (grouped by the apod.service label), marking the configured
+// proxy service as the web entrypoint so it lands in the App column.
+func (e *Engine) composeProcesses(ctx context.Context, domain string, driver *models.Driver) ([]ProcessInfo, error) {
+	containers, err := e.docker.ListSiteContainers(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+	proxySvc := ""
+	if driver.Compose != nil {
+		proxySvc = driver.Compose.ProxyService
+	}
+	return aggregateComposeProcesses(containers, proxySvc), nil
+}
+
+// aggregateComposeProcesses groups a site's containers by service (counting
+// running replicas) and marks the proxy service as the web entrypoint. Pure, so
+// it's testable without Docker.
+func aggregateComposeProcesses(containers []SiteContainer, proxySvc string) []ProcessInfo {
+	type agg struct {
+		image          string
+		total, running int
+	}
+	byService := map[string]*agg{}
+	var order []string
+	for _, c := range containers {
+		svc := c.Service
+		if svc == "" {
+			svc = "service"
+		}
+		a := byService[svc]
+		if a == nil {
+			a = &agg{image: c.Image}
+			byService[svc] = a
+			order = append(order, svc)
+		}
+		a.total++
+		if c.Running {
+			a.running++
+		}
+	}
+	sort.Strings(order)
+
+	out := make([]ProcessInfo, 0, len(order))
+	for _, svc := range order {
+		a := byService[svc]
+		role := "" // a backing service by default
+		if svc == proxySvc {
+			role = roleWeb
+		}
+		out = append(out, ProcessInfo{
+			Service:  svc,
+			Role:     role,
+			Image:    a.image,
+			Replicas: a.total,
+			Running:  a.running,
+			Scalable: false, // compose replica scaling isn't wired through apod
+		})
+	}
+	return out
 }
 
 // desiredReplicasFor resolves the replica count for one service, applying any
