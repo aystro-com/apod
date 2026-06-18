@@ -171,6 +171,14 @@ func (d *Docker) StartContainer(ctx context.Context, id string) error {
 	return d.cli.ContainerStart(ctx, id, container.StartOptions{})
 }
 
+// RestartContainer restarts a container in a single Docker API call (the daemon
+// performs the stop+start), so there is no window where the container is left
+// stopped if the caller's context is cancelled mid-operation.
+func (d *Docker) RestartContainer(ctx context.Context, id string) error {
+	timeout := 30
+	return d.cli.ContainerRestart(ctx, id, container.StopOptions{Timeout: &timeout})
+}
+
 func (d *Docker) StopContainer(ctx context.Context, id string) error {
 	timeout := 30
 	return d.cli.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})

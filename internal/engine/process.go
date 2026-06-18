@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aystro/apod/internal/models"
 )
@@ -138,6 +139,19 @@ func (e *Engine) ListProcesses(ctx context.Context, domain string) ([]ProcessInf
 		})
 	}
 	return out, nil
+}
+
+// isContainerNotReady reports whether an exec error is the transient "container
+// is still starting / restarting" condition, which is worth retrying (as
+// opposed to a real command failure).
+func isContainerNotReady(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "is restarting") ||
+		strings.Contains(s, "is not running") ||
+		strings.Contains(s, "is paused")
 }
 
 // composeProcesses builds the process list for a compose-managed site from its
@@ -317,6 +331,13 @@ func (e *Engine) RestartProcess(ctx context.Context, domain, svcName string) err
 	}
 	defer e.locks.Release(domain)
 
+	// Detach from the request context. Restarting the panel's own container
+	// drops the web client's connection the instant we stop it, which would
+	// otherwise cancel ctx and leave the container stopped (a 404 panel that
+	// never comes back). The restart must run to completion regardless.
+	ctx, cancel := detachCtx(ctx, 2*time.Minute)
+	defer cancel()
+
 	ids, err := e.serviceContainers(ctx, domain, svcName)
 	if err != nil {
 		return err
@@ -325,11 +346,10 @@ func (e *Engine) RestartProcess(ctx context.Context, domain, svcName string) err
 		return fmt.Errorf("no containers for service %q", svcName)
 	}
 	for _, id := range ids {
-		if err := e.docker.StopContainer(ctx, id); err != nil {
-			return fmt.Errorf("stop %s: %w", id, err)
-		}
-		if err := e.docker.StartContainer(ctx, id); err != nil {
-			return fmt.Errorf("start %s: %w", id, err)
+		// Atomic restart (single Docker call) — no window where the container is
+		// left stopped.
+		if err := e.docker.RestartContainer(ctx, id); err != nil {
+			return fmt.Errorf("restart %s: %w", id, err)
 		}
 	}
 	e.LogActivity(domain, "process_restart", svcName, "success")

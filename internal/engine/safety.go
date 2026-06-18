@@ -1,9 +1,20 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 )
+
+// detachCtx returns a context that survives the caller's cancellation, bounded
+// by a timeout. Used by container-lifecycle operations that may stop the very
+// container serving the request (the apod-ui panel): the web client's
+// connection drops the moment we stop it, cancelling the request context, but
+// the operation must still finish so the container comes back.
+func detachCtx(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), d)
+}
 
 type LockManager struct {
 	mu    sync.Mutex

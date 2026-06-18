@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aystro/apod/internal/db"
 	"github.com/aystro/apod/internal/models"
@@ -209,6 +210,9 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 			// otherwise a user could hijack another tenant's failed domain.
 			if (existing.Status == "creating" || existing.Status == "error") && existing.Owner == opts.Owner {
 				e.db.DeleteSite(opts.Domain)
+				// Wipe the previous (failed) attempt's activity so the reused
+				// domain doesn't show a different driver's stale log.
+				e.db.DeleteOperations(opts.Domain)
 				if err := e.db.CreateSite(site); err != nil {
 					return fmt.Errorf("create site record: %w", err)
 				}
@@ -229,9 +233,15 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 	provisioned := false
 	defer func() {
 		if !provisioned {
-			// Surface the failure to anyone watching the deploy. The message is
-			// the engine's own error text — never secrets or env values.
-			e.emitProgress(opts.Domain, "Deployment failed", "error", "", 100)
+			// Surface the failure reason to anyone watching the deploy so the UI
+			// shows *why* it failed instead of a bare "failed". It's the engine's
+			// own error text (already mirrored to the activity log) — never
+			// secrets or env values.
+			detail := ""
+			if err != nil {
+				detail = sanitizeProgressLine(firstLine(err.Error()))
+			}
+			e.emitProgress(opts.Domain, "Deployment failed", "error", detail, 100)
 			e.rollbackPartialCreate(opts.Domain, opts.Owner)
 			if err != nil {
 				e.LogActivity(opts.Domain, "create", err.Error(), "rolled-back")
@@ -480,7 +490,19 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 
 	for _, step := range driver.Setup {
 		containerName := fmt.Sprintf("apod-%s-%s", opts.Domain, step.Service)
-		_, err := e.docker.ExecInContainerAs(ctx, containerName, []string{"sh", "-c", step.Command}, step.User)
+		// A freshly-started container may still be booting (or briefly
+		// restarting) when its setup step runs — exec then fails with "container
+		// is restarting". Retry for a bounded window so a slow start, or a
+		// container that needs the very setup step to stop crash-looping, gets a
+		// chance to run.
+		var err error
+		for attempt := 0; attempt < 20; attempt++ {
+			_, err = e.docker.ExecInContainerAs(ctx, containerName, []string{"sh", "-c", step.Command}, step.User)
+			if err == nil || !isContainerNotReady(err) {
+				break
+			}
+			time.Sleep(3 * time.Second)
+		}
 		if err != nil {
 			e.db.UpdateSiteStatus(opts.Domain, "error")
 			return fmt.Errorf("setup step %q: %w", step.Name, err)
@@ -545,6 +567,8 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 		e.uptimeChecker.stopCheck(domain)
 	}
 	e.db.DeleteUptimeCheck(domain)
+	// Clear the activity log so a future site reusing this domain starts clean.
+	e.db.DeleteOperations(domain)
 
 	// Check if this is a compose site
 	site, _ := e.db.GetSite(domain)
@@ -666,6 +690,11 @@ func (e *Engine) StopSite(ctx context.Context, domain string) error {
 }
 
 func (e *Engine) RestartSite(ctx context.Context, domain string) error {
+	// Detach: restarting the panel's own site drops the web client's connection
+	// when we stop it, which would cancel ctx and skip the start — leaving the
+	// panel down. The restart must complete regardless of the client.
+	ctx, cancel := detachCtx(ctx, 3*time.Minute)
+	defer cancel()
 	if err := e.StopSite(ctx, domain); err != nil {
 		return err
 	}
