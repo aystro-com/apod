@@ -241,6 +241,13 @@ func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {
 
 // checkSiteAccess verifies the current user can access the given domain
 func (h *Handler) checkSiteAccess(w http.ResponseWriter, r *http.Request, domain string) bool {
+	// Reject malformed domains for EVERYONE (admins included) before the value
+	// is used to look up a site or build a filesystem path — a raw chi param
+	// like ".." must never flow through to destroy/backup/path operations.
+	if !isValidDomain(domain) {
+		respondError(w, http.StatusBadRequest, "invalid domain")
+		return false
+	}
 	user := UserFromContext(r.Context())
 	if user == nil || user.Role == "admin" {
 		return true

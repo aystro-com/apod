@@ -482,6 +482,12 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		}
 
 		if comp.Path != "" {
+			// comp.Path is joined into the cloned repo; reject absolute paths or
+			// any "../" escape so it can't move a directory from outside the repo.
+			cleanPath := filepath.Clean(comp.Path)
+			if filepath.IsAbs(cleanPath) || cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) {
+				return Invalid("invalid compose path %q", comp.Path)
+			}
 			tmpDir := compDir + "-tmp"
 			os.RemoveAll(tmpDir)
 			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, tmpDir)
@@ -490,7 +496,7 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 				return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
 			}
 			os.RemoveAll(compDir)
-			if err := os.Rename(filepath.Join(tmpDir, comp.Path), compDir); err != nil {
+			if err := os.Rename(filepath.Join(tmpDir, cleanPath), compDir); err != nil {
 				return fmt.Errorf("move compose subdir: %w", err)
 			}
 			os.RemoveAll(tmpDir)

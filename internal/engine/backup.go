@@ -324,6 +324,12 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 			if err != nil || info.IsDir() {
 				return nil
 			}
+			// Never follow symlinks: a tenant (who controls files under their
+			// site dir via SFTP) could symlink /etc/shadow, the apod DB, or the
+			// backup key and have it copied into a backup they can download.
+			if info.Mode()&os.ModeSymlink != 0 {
+				return nil
+			}
 			relPath, _ := filepath.Rel(expanded, path)
 			if prefix == "data" {
 				top := relPath

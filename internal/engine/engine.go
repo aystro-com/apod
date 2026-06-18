@@ -605,6 +605,12 @@ func chownDataOwner(path, owner string) {
 }
 
 func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) error {
+	// Validate the domain BEFORE it is ever used to build a filesystem path.
+	// With purge=true this domain reaches os.RemoveAll; an unvalidated value
+	// like ".." could otherwise delete the data dir or escape the sandbox.
+	if err := ValidateDomain(domain); err != nil {
+		return err
+	}
 	if err := e.locks.Acquire(domain); err != nil {
 		return err
 	}

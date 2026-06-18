@@ -434,6 +434,11 @@ func addDirToZip(zw *zip.Writer, dir, prefix string) {
 		if err != nil || info.IsDir() {
 			return nil
 		}
+		// Don't follow symlinks — a tenant could symlink a host file (e.g.
+		// /etc/shadow) into their site dir and exfiltrate it via the export.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 		relPath, _ := filepath.Rel(dir, path)
 		w, _ := zw.Create(filepath.Join(prefix, relPath))
 		f, err := os.Open(path)
