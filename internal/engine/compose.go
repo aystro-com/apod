@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -480,6 +481,9 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		if err := ValidateBranch(branch); err != nil {
 			return err
 		}
+		if err := validateRepoEgress(comp.Repo); err != nil {
+			return Invalid("repository host is not allowed: %v", err)
+		}
 
 		if comp.Path != "" {
 			// comp.Path is joined into the cloned repo; reject absolute paths or
@@ -493,7 +497,10 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, tmpDir)
 			cmd := exec.CommandContext(ctx, "git", args...)
 			if output, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
+				// Don't reflect git output to the caller (avoids echoing an
+				// internal host's response on an SSRF attempt).
+				log.Printf("clone compose repo %s failed: %s", opts.Domain, string(output))
+				return fmt.Errorf("clone compose repo failed: %w", err)
 			}
 			os.RemoveAll(compDir)
 			if err := os.Rename(filepath.Join(tmpDir, cleanPath), compDir); err != nil {
@@ -505,7 +512,10 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, compDir)
 			cmd := exec.CommandContext(ctx, "git", args...)
 			if output, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
+				// Don't reflect git output to the caller (avoids echoing an
+				// internal host's response on an SSRF attempt).
+				log.Printf("clone compose repo %s failed: %s", opts.Domain, string(output))
+				return fmt.Errorf("clone compose repo failed: %w", err)
 			}
 		}
 	}

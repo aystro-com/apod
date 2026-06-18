@@ -205,15 +205,20 @@ func validatePublicURL(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("URL must have a hostname")
 	}
-	// Block common internal hostnames
+	return checkHostPublic(host)
+}
+
+// checkHostPublic refuses internal hostnames and hosts that resolve to a
+// private/internal/metadata IP. Fails closed on resolution failure.
+func checkHostPublic(host string) error {
 	lower := strings.ToLower(host)
 	if lower == "localhost" || lower == "metadata.google.internal" || strings.HasSuffix(lower, ".internal") {
-		return fmt.Errorf("URL points to internal host")
+		return fmt.Errorf("points to internal host %q", host)
 	}
 	// If the host is a literal IP, validate it directly.
 	if litIP := net.ParseIP(host); litIP != nil {
 		if !isPublicIP(litIP) {
-			return fmt.Errorf("URL points to private/internal IP %s", host)
+			return fmt.Errorf("points to private/internal IP %s", host)
 		}
 		return nil
 	}
@@ -232,10 +237,47 @@ func validatePublicURL(rawURL string) error {
 			continue
 		}
 		if !isPublicIP(ip) {
-			return fmt.Errorf("URL resolves to private/internal IP %s", ipStr)
+			return fmt.Errorf("resolves to private/internal IP %s", ipStr)
 		}
 	}
 	return nil
+}
+
+// validateRepoEgress blocks SSRF via a git remote: an http(s) repo is fully
+// SSRF-checked (scheme + host resolution), and an ssh/git remote's host is
+// resolved and rejected if internal. Run at the point git actually executes
+// (not in the offline syntactic ValidateRepo). Empty repo is allowed.
+func validateRepoEgress(repo string) error {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return nil
+	}
+	if strings.HasPrefix(repo, "http://") || strings.HasPrefix(repo, "https://") {
+		return validatePublicURL(repo)
+	}
+	host := gitRemoteHost(repo)
+	if host == "" {
+		return nil
+	}
+	return checkHostPublic(host)
+}
+
+// gitRemoteHost extracts the host from an ssh://, git://, or scp-like
+// (user@host:path) git remote.
+func gitRemoteHost(repo string) string {
+	if strings.HasPrefix(repo, "ssh://") || strings.HasPrefix(repo, "git://") {
+		if u, err := url.Parse(repo); err == nil {
+			return u.Hostname()
+		}
+		return ""
+	}
+	if at := strings.IndexByte(repo, '@'); at >= 0 {
+		rest := repo[at+1:]
+		if colon := strings.IndexByte(rest, ':'); colon >= 0 {
+			return rest[:colon]
+		}
+	}
+	return ""
 }
 
 // Engine methods

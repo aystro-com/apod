@@ -57,9 +57,14 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 	// Git pull
 	var commitHash string
 	if site.Repo != "" {
-		cmd := exec.CommandContext(ctx, "git", "-C", siteRoot, "fetch", "origin")
-		cmd.Run()
-		cmd = exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "--", "origin/"+branch)
+		// Re-check egress at deploy time (guards against DNS rebinding since
+		// create) and apply the same transport/redirect hardening to fetch.
+		if err := validateRepoEgress(site.Repo); err != nil {
+			return Invalid("repository host is not allowed: %v", err)
+		}
+		fetchArgs := append(gitHardeningArgs(), "-C", siteRoot, "fetch", "origin")
+		exec.CommandContext(ctx, "git", fetchArgs...).Run()
+		cmd := exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "--", "origin/"+branch)
 		if err := cmd.Run(); err != nil {
 			// Maybe it's not a git repo yet, try clone
 			exec.CommandContext(ctx, "rm", "-rf", siteRoot).Run()

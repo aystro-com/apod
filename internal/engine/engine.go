@@ -285,11 +285,18 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		if branch == "" {
 			branch = "main"
 		}
+		if err := validateRepoEgress(opts.Repo); err != nil {
+			e.db.UpdateSiteStatus(opts.Domain, "error")
+			return Invalid("repository host is not allowed: %v", err)
+		}
 		args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--", opts.Repo, siteRoot)
 		cmd := exec.CommandContext(ctx, "git", args...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			e.db.UpdateSiteStatus(opts.Domain, "error")
-			return fmt.Errorf("git clone: %s: %w", string(output), err)
+			// Don't reflect git's output to the caller — it can echo an internal
+			// host's HTTP response (turning blind SSRF into exfiltration).
+			log.Printf("git clone %s failed: %s", opts.Domain, string(output))
+			return fmt.Errorf("git clone failed: %w", err)
 		}
 	}
 

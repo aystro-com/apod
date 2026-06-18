@@ -146,5 +146,8 @@ func gitHardeningArgs() []string {
 	return []string{
 		"-c", "protocol.ext.allow=never",
 		"-c", "protocol.file.allow=user",
+		// Don't follow HTTP redirects — a public repo URL could otherwise 30x to
+		// an internal/metadata host, defeating the egress SSRF check.
+		"-c", "http.followRedirects=false",
 	}
 }
