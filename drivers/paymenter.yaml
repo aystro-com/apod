@@ -71,9 +71,11 @@ setup:
   - name: "Wait for database"
     command: "sleep 10 && mysqladmin ping -h apod-${site_domain}-db --wait=30 2>/dev/null || sleep 5"
     service: app
+    optional: true
   - name: "Wait for Redis"
     command: "redis-cli -h apod-${site_domain}-redis ping 2>/dev/null || sleep 5"
     service: app
+    optional: true
   - name: "Download Paymenter"
     command: "cd /app && if [ ! -f artisan ]; then curl -Lo paymenter.tar.gz https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz && tar -xzf paymenter.tar.gz && rm paymenter.tar.gz; fi"
     service: app

@@ -47,6 +47,8 @@ setup:
   - name: "Wait for MongoDB"
     command: "sleep 10"
     service: db
+    optional: true
   - name: "Wait for UniFi startup"
     command: "sleep 30"
     service: app
+    optional: true

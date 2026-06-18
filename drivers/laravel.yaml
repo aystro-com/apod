@@ -102,6 +102,7 @@ setup:
   - name: "Wait for database"
     command: "sleep 10 && mysqladmin ping -h apod-${site_domain}-db --wait=30 2>/dev/null || sleep 5"
     service: app
+    optional: true
   - name: "Generate .env if missing"
     command: "cd /app && if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || touch .env; fi"
     service: app

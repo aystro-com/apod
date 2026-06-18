@@ -51,6 +51,7 @@ setup:
   - name: "Wait for database"
     command: "sleep 10 && mysqladmin ping -h apod-${site_domain}-db --wait=30 2>/dev/null || sleep 5"
     service: app
+    optional: true
   - name: "Create default index"
     command: "mkdir -p /app/public && if [ ! -f /app/public/index.php ]; then echo '<?php phpinfo();' > /app/public/index.php; fi"
     service: app

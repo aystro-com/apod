@@ -52,3 +52,4 @@ setup:
     # the wait (WordPress retries the connection itself).
     command: "php -r 'for($i=0;$i<60;$i++){if($c=@fsockopen(\"apod-${site_domain}-db\",3306)){fclose($c);break;}sleep(1);}'"
     service: app
+    optional: true

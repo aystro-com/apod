@@ -50,7 +50,9 @@ setup:
   - name: "Wait for PostgreSQL"
     command: "until pg_isready -h apod-${site_domain}-db -U ${site_db_user}; do sleep 2; done"
     service: db
+    optional: true
   - name: "Fix Odoo permissions"
     command: "mkdir -p /var/lib/odoo/.local /var/lib/odoo/sessions /var/lib/odoo/filestore /etc/odoo /mnt/extra-addons && chown -R odoo:odoo /var/lib/odoo /mnt/extra-addons /etc/odoo"
     service: app
     user: root
+    optional: true

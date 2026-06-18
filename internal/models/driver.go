@@ -50,6 +50,10 @@ type DriverSetupStep struct {
 	Command string `yaml:"command"`
 	Service string `yaml:"service"`
 	User    string `yaml:"user,omitempty"`
+	// Optional marks a best-effort step (a wait, a permission tweak): if it
+	// fails, the deploy logs a warning and continues instead of rolling the
+	// whole site back. Essential steps (installs, migrations) leave this false.
+	Optional bool `yaml:"optional,omitempty"`
 }
 
 type DriverDeployHooks struct {

@@ -504,6 +504,14 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 			time.Sleep(3 * time.Second)
 		}
 		if err != nil {
+			// Best-effort steps (waits, permission tweaks) never roll back an
+			// otherwise-working site — log and carry on. Essential steps still
+			// fail the create so a half-provisioned site is torn down.
+			if step.Optional {
+				e.LogActivity(opts.Domain, "setup",
+					fmt.Sprintf("optional step %q failed (continuing): %v", step.Name, err), "warning")
+				continue
+			}
 			e.db.UpdateSiteStatus(opts.Domain, "error")
 			return fmt.Errorf("setup step %q: %w", step.Name, err)
 		}

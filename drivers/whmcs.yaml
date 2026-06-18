@@ -51,6 +51,7 @@ setup:
   - name: "Wait for database"
     command: "sleep 10 && mysqladmin ping -h apod-${site_domain}-db --wait=30 2>/dev/null || sleep 5"
     service: app
+    optional: true
   - name: "Install ionCube loader"
     command: "cd /tmp && curl -sL https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz | tar xz && cp ioncube/ioncube_loader_lin_${php_version}.so $(php -i | grep extension_dir | head -1 | awk '{print $NF}')/ioncube.so && echo 'zend_extension=ioncube.so' > /usr/local/etc/php/conf.d/00-ioncube.ini && rm -rf ioncube"
     service: app
@@ -59,6 +60,7 @@ setup:
     command: "chmod -R 777 /app/storage /app/bootstrap/cache 2>/dev/null; chown -R application:application /app"
     service: app
     user: root
+    optional: true
   - name: "Restart PHP-FPM"
     command: "supervisorctl restart php-fpm 2>/dev/null || kill -USR2 1 || true"
     service: app
