@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -8,10 +9,78 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/aystro/apod/internal/engine"
 	"github.com/go-chi/chi/v5"
 )
+
+// maxDeployStreamDuration bounds how long a single deploy-events SSE connection
+// may stay open, so a client cannot hold a streaming goroutine indefinitely.
+const maxDeployStreamDuration = 15 * time.Minute
+
+// DeployEvents streams a site's live deployment progress as Server-Sent Events.
+// It is gated by the same per-site ownership check as every other site route —
+// a user can only watch deployments for sites they own (admins, all sites). The
+// connection is bounded in time, ends on the terminal event, and is torn down
+// when the client disconnects.
+func (h *Handler) DeployEvents(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return // checkSiteAccess already wrote 403/404
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		respondError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering
+	w.WriteHeader(http.StatusOK)
+
+	replay, ch, cancel := h.engine.SubscribeProgress(domain)
+	defer cancel()
+
+	send := func(ev engine.ProgressEvent) bool {
+		data, err := json.Marshal(ev)
+		if err != nil {
+			return true
+		}
+		if _, err := io.WriteString(w, "data: "+string(data)+"\n\n"); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return ev.Terminal()
+	}
+
+	for _, ev := range replay {
+		if send(ev) {
+			return // deploy already finished — replay was enough
+		}
+	}
+
+	deadline := time.NewTimer(maxDeployStreamDuration)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-r.Context().Done(): // client disconnected
+			return
+		case <-deadline.C:
+			return
+		case ev, open := <-ch:
+			if !open {
+				return
+			}
+			if send(ev) {
+				return
+			}
+		}
+	}
+}
 
 type Handler struct {
 	engine *engine.Engine
@@ -109,11 +178,18 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		Params:  req.Params,
 		Owner:   owner,
 	}
+	// Detach the deployment from the request context so closing the browser (or
+	// any client disconnect) never cancels an in-flight provision — it always
+	// runs to completion server-side and the progress stream can be re-attached.
+	// A generous timeout still bounds a stuck deploy.
+	deployCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
+	defer cancel()
+
 	var err error
 	if req.ComposeFile != "" {
-		err = h.engine.CreateSiteFromCompose(r.Context(), opts, req.ComposeFile)
+		err = h.engine.CreateSiteFromCompose(deployCtx, opts, req.ComposeFile)
 	} else {
-		err = h.engine.CreateSite(r.Context(), opts)
+		err = h.engine.CreateSite(deployCtx, opts)
 	}
 	if err != nil {
 		respondEngineError(w, err)

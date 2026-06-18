@@ -75,6 +75,7 @@ func New(e *engine.Engine) *Server {
 		r.Post("/sites", h.CreateSite)
 		r.Get("/sites", h.ListSites)
 		r.Get("/sites/{domain}", h.GetSite)
+		r.Get("/sites/{domain}/deploy/events", h.DeployEvents)
 		r.Get("/sites/{domain}/info", h.SiteInfo)
 		r.Post("/sites/{domain}/start", h.StartSite)
 		r.Post("/sites/{domain}/stop", h.StopSite)

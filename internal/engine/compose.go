@@ -1,13 +1,16 @@
 package engine
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/aystro/apod/internal/models"
 	"gopkg.in/yaml.v3"
@@ -498,6 +501,7 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 	if err := validateComposeSecurity(composeFile); err != nil {
 		return fmt.Errorf("compose security check: %w", err)
 	}
+	e.emitProgress(opts.Domain, "Validating configuration", "running", "", 30)
 
 	// Discover services and set up shared resource pool
 	services, err := discoverComposeServices(composeFile)
@@ -523,12 +527,13 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		return fmt.Errorf("generate override: %w", err)
 	}
 
-	// Start compose (automatically picks up override file)
-	cmd := composeCmd(ctx, project, compDir, "up", "-d")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("docker compose up: %s: %w", string(output), err)
+	// Start compose, streaming its lifecycle lines as live deploy progress.
+	e.emitProgress(opts.Domain, "Pulling images & starting containers", "running", "", 45)
+	if err := e.composeUpStreaming(ctx, opts.Domain, project, compDir); err != nil {
+		return err
 	}
 
+	e.emitProgress(opts.Domain, "Configuring routing", "running", "", 85)
 	// Connect Traefik to the compose network
 	composeNetwork := project + "_default"
 	e.docker.ConnectNetwork(ctx, composeNetwork, "apod-traefik")
@@ -563,6 +568,100 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		}
 	}
 
+	return nil
+}
+
+// composeProgressKeywords are the docker-compose lifecycle words we surface as
+// deploy progress. Restricting to this set means only recognised status lines
+// are streamed to watchers — never arbitrary or sensitive output.
+var composeProgressKeywords = []string{
+	"Pulling", "Pulled", "Creating", "Created", "Starting", "Started", "Running",
+}
+
+// sanitizeProgressLine strips control characters and caps length so a single
+// noisy compose line (progress bars use carriage returns/ANSI) cannotinjを
+// inject garbage or unbounded data into the event stream.
+func sanitizeProgressLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '\t' {
+			r = ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			continue // drop control chars (incl. CR and ANSI escape bytes)
+		}
+		b.WriteRune(r)
+	}
+	out := strings.TrimSpace(b.String())
+	if len(out) > 160 {
+		out = out[:160]
+	}
+	return out
+}
+
+func isComposeProgressLine(line string) bool {
+	for _, kw := range composeProgressKeywords {
+		if strings.Contains(line, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// composeUpStreaming runs `docker compose up -d`, emitting recognised lifecycle
+// lines as deploy progress detail in real time. It preserves the original error
+// semantics (the failing output is included in the returned error).
+func (e *Engine) composeUpStreaming(ctx context.Context, domain, project, compDir string) error {
+	cmd := composeCmd(ctx, project, compDir, "up", "-d")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("docker compose up: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("docker compose up: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("docker compose up: %w", err)
+	}
+
+	var mu sync.Mutex
+	var tail []string
+	last := ""
+	scan := func(r io.Reader) {
+		sc := bufio.NewScanner(r)
+		sc.Buffer(make([]byte, 64*1024), 1<<20)
+		for sc.Scan() {
+			line := sanitizeProgressLine(sc.Text())
+			if line == "" {
+				continue
+			}
+			mu.Lock()
+			tail = append(tail, line)
+			if len(tail) > 40 {
+				tail = tail[len(tail)-40:]
+			}
+			emit := isComposeProgressLine(line) && line != last
+			last = line
+			mu.Unlock()
+			if emit {
+				e.emitProgress(domain, "Pulling images & starting containers", "running", line, 60)
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); scan(stdout) }()
+	go func() { defer wg.Done(); scan(stderr) }()
+	wg.Wait()
+
+	if err := cmd.Wait(); err != nil {
+		mu.Lock()
+		out := strings.Join(tail, "; ")
+		mu.Unlock()
+		return fmt.Errorf("docker compose up: %s: %w", out, err)
+	}
 	return nil
 }
 

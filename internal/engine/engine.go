@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/aystro/apod/internal/db"
 	"github.com/aystro/apod/internal/models"
@@ -33,6 +34,8 @@ type Engine struct {
 	uptimeChecker *UptimeChecker
 	cronManager   *CronManager
 	loginThrottle *loginThrottle
+	progress      *progressHub
+	progressOnce  sync.Once
 }
 
 type Config struct {
@@ -220,9 +223,15 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 	// From here on the site record exists and we start creating real resources.
 	// If anything below fails, tear it all back down so a failed create never
 	// leaves orphan containers, networks, files or a half-built record.
+	// Start a fresh deployment progress stream for this domain.
+	e.beginDeploy(opts.Domain, "Preparing deployment")
+
 	provisioned := false
 	defer func() {
 		if !provisioned {
+			// Surface the failure to anyone watching the deploy. The message is
+			// the engine's own error text — never secrets or env values.
+			e.emitProgress(opts.Domain, "Deployment failed", "error", "", 100)
 			e.rollbackPartialCreate(opts.Domain, opts.Owner)
 			if err != nil {
 				e.LogActivity(opts.Domain, "create", err.Error(), "rolled-back")
@@ -347,6 +356,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		// compose site back down. Without this, every successful compose site was
 		// immediately destroyed while CreateSite still returned nil.
 		provisioned = true
+		e.emitProgress(opts.Domain, "Ready", "done", opts.Domain+" is live", 100)
 		return nil
 	}
 
@@ -501,6 +511,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 	}
 
 	provisioned = true
+	e.emitProgress(opts.Domain, "Ready", "done", opts.Domain+" is live", 100)
 	return nil
 }
 
