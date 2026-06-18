@@ -94,7 +94,7 @@ var proxyRemoveCmd = &cobra.Command{
 		var id int64
 		fmt.Sscanf(args[1], "%d", &id)
 		body := map[string]int64{"id": id}
-		_, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/proxy/remove", args[0]), body)
+		_, err := client.Delete2(fmt.Sprintf("/api/v1/sites/%s/proxy", args[0]), body)
 		if err != nil {
 			return err
 		}

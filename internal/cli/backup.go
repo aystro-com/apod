@@ -188,7 +188,7 @@ var backupScheduleRemoveCmd = &cobra.Command{
 		var scheduleID int64
 		fmt.Sscanf(args[1], "%d", &scheduleID)
 		body := map[string]int64{"schedule_id": scheduleID}
-		_, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/backups/schedule/remove", args[0]), body)
+		_, err := client.Delete2(fmt.Sprintf("/api/v1/sites/%s/backups/schedule", args[0]), body)
 		if err != nil {
 			return err
 		}
