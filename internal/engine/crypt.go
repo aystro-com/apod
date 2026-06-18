@@ -5,12 +5,76 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/crypto/scrypt"
 )
+
+// secretEncPrefix marks an encrypted secret/credential value stored in the DB,
+// so encrypted and legacy plaintext rows can be told apart on read.
+const secretEncPrefix = "enc:v1:"
+
+// encryptSecretValue encrypts a small secret (DB password, JWT secret, storage
+// credential, …) with the instance key using AES-256-GCM, returning a
+// prefixed, base64 string suitable for a TEXT column. Encrypting secrets at rest
+// means a leaked DB file alone doesn't expose them.
+func (e *Engine) encryptSecretValue(plaintext string) (string, error) {
+	key, err := e.backupKey()
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	ct := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return secretEncPrefix + base64.StdEncoding.EncodeToString(ct), nil
+}
+
+// decryptSecretValue reverses encryptSecretValue. A value without the prefix is
+// returned unchanged (legacy plaintext), so existing rows keep working.
+func (e *Engine) decryptSecretValue(stored string) (string, error) {
+	if !strings.HasPrefix(stored, secretEncPrefix) {
+		return stored, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(stored, secretEncPrefix))
+	if err != nil {
+		return "", fmt.Errorf("decode secret: %w", err)
+	}
+	key, err := e.backupKey()
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	ns := gcm.NonceSize()
+	if len(raw) < ns {
+		return "", fmt.Errorf("encrypted secret is truncated")
+	}
+	pt, err := gcm.Open(nil, raw[:ns], raw[ns:], nil)
+	if err != nil {
+		return "", fmt.Errorf("decrypt secret (wrong key?): %w", err)
+	}
+	return string(pt), nil
+}
 
 // backupEncMagic prefixes encrypted backup archives so encrypted and legacy
 // plaintext backups can be told apart on read.

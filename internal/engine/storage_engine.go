@@ -52,7 +52,13 @@ func (e *Engine) RemoveBackupSchedule(ctx context.Context, scheduleID int64, dom
 // Storage config operations
 
 func (e *Engine) AddStorageConfig(name, driver, configJSON string) error {
-	return e.db.CreateStorageConfig(name, driver, configJSON)
+	// The config blob holds cloud/SFTP credentials — encrypt it at rest so a
+	// leaked DB file doesn't expose them.
+	enc, err := e.encryptSecretValue(configJSON)
+	if err != nil {
+		return err
+	}
+	return e.db.CreateStorageConfig(name, driver, enc)
 }
 
 // secretConfigKeys are storage-config fields that must never be returned to a
@@ -73,9 +79,14 @@ func (e *Engine) ListStorageConfigs() (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Redact credentials before the configs leave the engine.
+	// Decrypt (if stored encrypted) then redact credentials before the configs
+	// leave the engine.
 	for i := range configs {
-		configs[i].Config = redactStorageSecrets(configs[i].Config)
+		dec, derr := e.decryptSecretValue(configs[i].Config)
+		if derr != nil {
+			dec = "{}"
+		}
+		configs[i].Config = redactStorageSecrets(dec)
 	}
 	return configs, nil
 }

@@ -342,10 +342,11 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 
 	// Persist generated secrets as the authoritative record (backup/clone read
 	// these instead of reverse-engineering them from container env or .env).
-	e.db.SetSiteSecret(opts.Domain, "db_password", dbPass)
+	// Stored encrypted at rest via setSiteSecret.
+	e.setSiteSecret(opts.Domain, "db_password", dbPass)
 	for _, varName := range genOrder {
 		if v, ok := vars[varName]; ok {
-			e.db.SetSiteSecret(opts.Domain, varName, v)
+			e.setSiteSecret(opts.Domain, varName, v)
 		}
 	}
 
@@ -914,15 +915,37 @@ func (e *Engine) siteVars(site *models.Site) map[string]string {
 		"site_db_name": dbName,
 		"site_db_user": dbName,
 	}
-	if pass, ok, _ := e.db.GetSiteSecret(site.Domain, "db_password"); ok {
+	if pass, ok, _ := e.getSiteSecret(site.Domain, "db_password"); ok {
 		vars["site_db_pass"] = pass
 	}
 	for _, name := range generatedSecretNames {
-		if v, ok, _ := e.db.GetSiteSecret(site.Domain, name); ok {
+		if v, ok, _ := e.getSiteSecret(site.Domain, name); ok {
 			vars[name] = v
 		}
 	}
 	return vars
+}
+
+// setSiteSecret stores a site secret encrypted at rest. getSiteSecret reads and
+// transparently decrypts it (legacy plaintext rows are returned as-is).
+func (e *Engine) setSiteSecret(domain, key, value string) error {
+	enc, err := e.encryptSecretValue(value)
+	if err != nil {
+		return err
+	}
+	return e.db.SetSiteSecret(domain, key, enc)
+}
+
+func (e *Engine) getSiteSecret(domain, key string) (string, bool, error) {
+	v, ok, err := e.db.GetSiteSecret(domain, key)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	dec, derr := e.decryptSecretValue(v)
+	if derr != nil {
+		return "", false, derr
+	}
+	return dec, true, nil
 }
 
 func randomHex(n int) string {

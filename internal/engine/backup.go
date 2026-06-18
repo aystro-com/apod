@@ -113,7 +113,7 @@ func dbVolumeDirs(driver *models.Driver) map[string]bool {
 // back to reading the live DB service container's env. Returns "" if neither
 // has it.
 func (e *Engine) sourceDBPassword(ctx context.Context, domain string, driver *models.Driver) string {
-	if v, ok, _ := e.db.GetSiteSecret(domain, "db_password"); ok && v != "" {
+	if v, ok, _ := e.getSiteSecret(domain, "db_password"); ok && v != "" {
 		return v
 	}
 	keys := []string{"MYSQL_PASSWORD", "MARIADB_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD"}
@@ -192,8 +192,12 @@ func (e *Engine) getStorage(ctx context.Context, storageName, owner string) (sto
 		return nil, fmt.Errorf("get storage config: %w", err)
 	}
 
+	decConfig, err := e.decryptSecretValue(sc.Config)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt storage config: %w", err)
+	}
 	var config map[string]string
-	if err := json.Unmarshal([]byte(sc.Config), &config); err != nil {
+	if err := json.Unmarshal([]byte(decConfig), &config); err != nil {
 		return nil, fmt.Errorf("parse storage config: %w", err)
 	}
 
