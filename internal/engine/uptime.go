@@ -162,12 +162,22 @@ func isPublicIP(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
+	// Normalize IPv4-mapped IPv6 (::ffff:a.b.c.d) so the checks below apply.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 		return false
 	}
+	// 100.64.0.0/10 — carrier-grade NAT (RFC 6598), reachable internal space.
+	if cgnat.Contains(ip) {
+		return false
+	}
 	return true
 }
+
+var _, cgnat, _ = net.ParseCIDR("100.64.0.0/10")
 
 func (uc *UptimeChecker) sendAlert(webhook, domain, status string, statusCode int) {
 	if err := validatePublicURL(webhook); err != nil {

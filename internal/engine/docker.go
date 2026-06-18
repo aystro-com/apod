@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -46,8 +47,10 @@ func (d *Docker) PullImage(ctx context.Context, ref string) error {
 	reader, err := d.cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
 		// Pull failed — fall back to a locally-present image if there is one
-		// (air-gapped hosts, pre-loaded or locally-built images).
+		// (air-gapped hosts, pre-loaded or locally-built images). Log it: a
+		// silent fallback could otherwise run a stale/locally-seeded image.
 		if _, inspErr := d.cli.ImageInspect(ctx, ref); inspErr == nil {
+			log.Printf("warning: pull of %s failed (%v); using locally-present image", ref, err)
 			return nil
 		}
 		return fmt.Errorf("pull image %s: %w", ref, err)

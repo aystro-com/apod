@@ -613,7 +613,9 @@ func (h *Handler) DownloadBackupHandler(w http.ResponseWriter, r *http.Request) 
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	w.Header().Set("Content-Disposition", "attachment; filename="+domain+"_backup.zip")
+	// domain is validated by checkSiteAccess (no quotes/CR/LF), so quoting the
+	// filename here is safe and defends against header injection regardless.
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+domain+"_backup.zip\"")
 	w.Header().Set("Content-Type", "application/zip")
 	http.ServeFile(w, r, path)
 }
