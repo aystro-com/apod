@@ -1640,7 +1640,10 @@ func (h *Handler) CheckUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.engine.SelfUpdate(r.Context()); err != nil {
-		respondEngineError(w, err)
+		// Admin-only operational action: surface the real reason (download /
+		// checksum / permission failure) instead of a masked "internal server
+		// error", so the operator can actually fix it.
+		respondError(w, http.StatusBadGateway, "update failed: "+err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "updated", "message": "restart apod server to use new version"})
@@ -1649,7 +1652,7 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateDriversHandler(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.engine.UpdateDrivers(r.Context())
 	if err != nil {
-		respondEngineError(w, err)
+		respondError(w, http.StatusBadGateway, "driver update failed: "+err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"updated": updated})
