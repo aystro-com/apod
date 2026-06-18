@@ -7,8 +7,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+
+	"github.com/aystro/apod/internal/models"
 )
 
+// Clone creates a new site that is a faithful copy of an existing one.
+//
+// For normal (non-compose) sites it performs a *physical* clone: it quiesces the
+// source (so its on-disk state is consistent), copies the site's files and data
+// volumes byte-for-byte, then brings the source back up and stands the target up
+// on the copied data while preserving the source's database credentials. This is
+// stack-agnostic by construction — there is no per-database dump/restore logic,
+// so it works the same for MySQL, Postgres, Mongo, Redis, SQLite, or a site with
+// no database at all. The trade-off is brief source downtime for the duration of
+// the copy (a filesystem snapshot could remove even that; see docs/testing.md).
+//
+// Compose-managed sites keep their own networks and secrets, so they use a
+// logical copy of declared paths plus a dump/restore of declared databases.
 func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) error {
 	if err := ValidateDomain(targetDomain); err != nil {
 		return err
@@ -26,143 +42,202 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 	if err != nil {
 		return fmt.Errorf("get source site: %w", err)
 	}
+	if source == nil {
+		return fmt.Errorf("source site %q not found", sourceDomain)
+	}
+	if existing, _ := e.db.GetSite(targetDomain); existing != nil {
+		return fmt.Errorf("target site %q already exists", targetDomain)
+	}
 
 	driver, err := e.drivers.Load(source.Driver)
 	if err != nil {
 		return fmt.Errorf("load driver: %w", err)
 	}
 
-	// Create target site with same config
-	err = e.CreateSite(ctx, CreateSiteOpts{
-		Domain: targetDomain,
-		Driver: source.Driver,
-		RAM:    source.RAM,
-		CPU:    source.CPU,
-		Repo:   source.Repo,
-		Branch: source.Branch,
+	if driver.Type == "compose" {
+		return e.cloneCompose(ctx, source, driver, targetDomain)
+	}
+	return e.clonePhysical(ctx, source, driver, targetDomain)
+}
+
+// clonePhysical implements the consistent volume-copy clone described on Clone.
+func (e *Engine) clonePhysical(ctx context.Context, source *models.Site, driver *models.Driver, targetDomain string) error {
+	sourceRoot, sourceData := e.SiteDir(source.Owner, source.Domain)
+	targetRoot, targetData := e.SiteDir(source.Owner, targetDomain)
+
+	// Capture the source's DB credentials so the copied data directory stays
+	// valid under the target (which would otherwise generate new ones).
+	srcDBPass := e.sourceDBPassword(ctx, source.Domain, driver)
+	if srcDBPass == "" {
+		srcDBPass = readEnvFileValue(filepath.Join(sourceRoot, ".env"), "DB_PASSWORD")
+	}
+	srcDBName := strings.ReplaceAll(source.Domain, ".", "_")
+
+	// Quiesce the source so files and databases are copied from a consistent,
+	// at-rest state (a hot copy of a live DB is not crash-consistent).
+	srcIDs, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", source.Domain)
+	for _, id := range srcIDs {
+		e.docker.StopContainer(ctx, id)
+	}
+
+	copyErr := copyDir(sourceRoot, targetRoot)
+	if copyErr == nil {
+		copyErr = copyDir(sourceData, targetData)
+	}
+
+	// Bring the source back up as soon as the copy is done — minimise downtime.
+	for _, id := range srcIDs {
+		e.docker.StartContainer(ctx, id)
+	}
+	if copyErr != nil {
+		os.RemoveAll(targetRoot)
+		os.RemoveAll(targetData)
+		return fmt.Errorf("copy site data: %w", copyErr)
+	}
+
+	// Stand the target up on the copied data, preserving the source's DB
+	// credentials and name and skipping the git clone (files are already
+	// present). CreateSite's setup steps reconcile the app to its new
+	// environment (e.g. clearing cached config that pinned the source).
+	err := e.CreateSite(ctx, CreateSiteOpts{
+		Domain:     targetDomain,
+		Driver:     source.Driver,
+		RAM:        source.RAM,
+		CPU:        source.CPU,
+		Owner:      source.Owner,
+		Repo:       source.Repo,
+		Branch:     source.Branch,
+		SkipClone:  true,
+		DBName:     srcDBName,
+		DBPassword: srcDBPass,
 	})
 	if err != nil {
 		return fmt.Errorf("create target site: %w", err)
 	}
 
-	isCompose := driver.Type == "compose"
-
-	sourceRoot, sourceData := e.SiteDir(source.Owner, sourceDomain)
-	target, _ := e.db.GetSite(targetDomain)
-	targetRoot, targetData := e.SiteDir(target.Owner, targetDomain)
-
-	if isCompose {
-		// For compose sites: only copy storage/upload files, NOT raw DB data or compose config.
-		// The target already has its own compose setup with fresh secrets.
-		// We copy driver-defined backup paths (e.g., storage files).
-		for _, p := range driver.Backup.Paths {
-			srcPath := strings.ReplaceAll(p, "${site_root}", sourceRoot)
-			srcPath = strings.ReplaceAll(srcPath, "${data_root}", sourceData)
-			dstPath := strings.ReplaceAll(p, "${site_root}", targetRoot)
-			dstPath = strings.ReplaceAll(dstPath, "${data_root}", targetData)
-			copyDir(srcPath, dstPath)
-		}
-	} else {
-		// Normal sites: copy all files and data
-		copyDir(sourceRoot, targetRoot)
-		copyDir(sourceData, targetData)
-	}
-
-	// Copy env vars
-	envs, _ := parseEnvJSON(source.Env)
-	if len(envs) > 0 {
+	if envs, _ := parseEnvJSON(source.Env); len(envs) > 0 {
 		envJSON, _ := envToJSON(envs)
 		e.db.UpdateSiteConfig(targetDomain, map[string]string{"env": envJSON})
 	}
 
-	// Dump and import database
-	dbName := strings.ReplaceAll(sourceDomain, ".", "_")
-	dbUser := dbName
-	targetDbName := strings.ReplaceAll(targetDomain, ".", "_")
-
-	for _, dbCfg := range driver.Backup.Databases {
-		// Dump from source
-		var dumpCmd []string
-		if isCompose {
-			dumpCmd = composeDumpCommand(dbCfg.Type)
-		} else {
-			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser)
-		}
-		if dumpCmd == nil {
-			continue
-		}
-
-		var output string
-		if isCompose {
-			output, err = e.ExecInComposeSite(ctx, sourceDomain, source.Owner, dbCfg.Service, dumpCmd)
-		} else {
-			sourceContainer := fmt.Sprintf("apod-%s-%s", sourceDomain, dbCfg.Service)
-			output, err = e.docker.ExecInContainer(ctx, sourceContainer, dumpCmd)
-		}
-		if err != nil {
-			continue
-		}
-
-		// Import to target
-		b64Dump := base64Encode([]byte(output))
-		var restoreShell string
-		if isCompose {
-			// Compose: use default user
-			switch dbCfg.Type {
-			case "mysql":
-				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql -u root -p\"$MYSQL_ROOT_PASSWORD\" < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
-			case "postgres":
-				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U \"${POSTGRES_USER:-postgres}\" -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
-			}
-			if restoreShell != "" {
-				e.ExecInComposeSite(ctx, targetDomain, target.Owner, dbCfg.Service, []string{"sh", "-c", restoreShell})
-			}
-		} else {
-			switch dbCfg.Type {
-			case "mysql":
-				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
-			case "postgres":
-				restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U %s -d %s -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump, targetDbName, targetDbName)
-			}
-			if restoreShell != "" {
-				targetContainer := fmt.Sprintf("apod-%s-%s", targetDomain, dbCfg.Service)
-				e.docker.ExecInContainer(ctx, targetContainer, []string{"sh", "-c", restoreShell})
-			}
-		}
-	}
-
-	e.LogActivity(sourceDomain, "clone", fmt.Sprintf("cloned to %s", targetDomain), "success")
-	e.LogActivity(targetDomain, "clone", fmt.Sprintf("cloned from %s", sourceDomain), "success")
+	e.LogActivity(source.Domain, "clone", fmt.Sprintf("cloned to %s", targetDomain), "success")
+	e.LogActivity(targetDomain, "clone", fmt.Sprintf("cloned from %s", source.Domain), "success")
 	return nil
 }
 
+// cloneCompose clones a compose-managed site: the target gets its own fresh
+// compose project (networks, secrets), so only declared file paths are copied
+// and declared databases are moved via a logical dump/restore.
+func (e *Engine) cloneCompose(ctx context.Context, source *models.Site, driver *models.Driver, targetDomain string) error {
+	if err := e.CreateSite(ctx, CreateSiteOpts{
+		Domain: targetDomain,
+		Driver: source.Driver,
+		RAM:    source.RAM,
+		CPU:    source.CPU,
+		Owner:  source.Owner,
+		Repo:   source.Repo,
+		Branch: source.Branch,
+	}); err != nil {
+		return fmt.Errorf("create target site: %w", err)
+	}
+
+	sourceRoot, sourceData := e.SiteDir(source.Owner, source.Domain)
+	target, _ := e.db.GetSite(targetDomain)
+	targetRoot, targetData := e.SiteDir(target.Owner, targetDomain)
+
+	// Copy only driver-declared paths (e.g. uploads) — not raw DB data or the
+	// compose config, which the target provisions itself.
+	for _, p := range driver.Backup.Paths {
+		srcPath := strings.ReplaceAll(p, "${site_root}", sourceRoot)
+		srcPath = strings.ReplaceAll(srcPath, "${data_root}", sourceData)
+		dstPath := strings.ReplaceAll(p, "${site_root}", targetRoot)
+		dstPath = strings.ReplaceAll(dstPath, "${data_root}", targetData)
+		copyDir(srcPath, dstPath)
+	}
+
+	if envs, _ := parseEnvJSON(source.Env); len(envs) > 0 {
+		envJSON, _ := envToJSON(envs)
+		e.db.UpdateSiteConfig(targetDomain, map[string]string{"env": envJSON})
+	}
+
+	for _, dbCfg := range driver.Backup.Databases {
+		dumpCmd := composeDumpCommand(dbCfg.Type)
+		if dumpCmd == nil {
+			continue
+		}
+		dump, err := e.ExecInComposeSite(ctx, source.Domain, source.Owner, dbCfg.Service, dumpCmd)
+		if err != nil {
+			continue
+		}
+		b64Dump := base64Encode([]byte(dump))
+		var restoreShell string
+		switch dbCfg.Type {
+		case "mysql":
+			restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql --binary-mode=1 -u root -p\"$MYSQL_ROOT_PASSWORD\" < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
+		case "postgres":
+			restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U \"${POSTGRES_USER:-postgres}\" -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
+		}
+		if restoreShell != "" {
+			e.ExecInComposeSite(ctx, targetDomain, target.Owner, dbCfg.Service, []string{"sh", "-c", restoreShell})
+		}
+	}
+
+	e.LogActivity(source.Domain, "clone", fmt.Sprintf("cloned to %s", targetDomain), "success")
+	e.LogActivity(targetDomain, "clone", fmt.Sprintf("cloned from %s", source.Domain), "success")
+	return nil
+}
+
+// copyDir recursively copies src to dst, preserving file mode, ownership
+// (uid/gid) and symlinks. Ownership matters for database data directories,
+// whose files are owned by the in-container DB uid (e.g. mysql, postgres) and
+// would be unreadable to the copied DB if flattened to root.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-
 		relPath, _ := filepath.Rel(src, path)
 		dstPath := filepath.Join(dst, relPath)
 
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, 0755)
+		uid, gid := -1, -1
+		if st, ok := info.Sys().(*syscall.Stat_t); ok {
+			uid, gid = int(st.Uid), int(st.Gid)
 		}
 
-		srcFile, err := os.Open(path)
-		if err != nil {
-			return nil
+		switch {
+		case info.IsDir():
+			if err := os.MkdirAll(dstPath, info.Mode().Perm()); err != nil {
+				return err
+			}
+		case info.Mode()&os.ModeSymlink != 0:
+			target, lerr := os.Readlink(path)
+			if lerr != nil {
+				return nil
+			}
+			os.Remove(dstPath)
+			if err := os.Symlink(target, dstPath); err != nil {
+				return nil
+			}
+			os.Lchown(dstPath, uid, gid)
+			return nil // don't chmod/chown-follow a symlink below
+		default:
+			srcFile, oerr := os.Open(path)
+			if oerr != nil {
+				return nil
+			}
+			defer srcFile.Close()
+			os.MkdirAll(filepath.Dir(dstPath), 0755)
+			dstFile, cerr := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+			if cerr != nil {
+				return nil
+			}
+			if _, err := io.Copy(dstFile, srcFile); err != nil {
+				dstFile.Close()
+				return err
+			}
+			dstFile.Close()
 		}
-		defer srcFile.Close()
-
-		os.MkdirAll(filepath.Dir(dstPath), 0755)
-		dstFile, err := os.Create(dstPath)
-		if err != nil {
-			return nil
-		}
-		defer dstFile.Close()
-
-		_, err = io.Copy(dstFile, srcFile)
-		return err
+		os.Chown(dstPath, uid, gid)
+		return nil
 	})
 }

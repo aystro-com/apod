@@ -154,6 +154,9 @@ type CreateSiteOpts struct {
 	// credentials and database name, leaving its restored data directory valid.
 	DBName     string
 	DBPassword string
+	// SkipClone keeps Repo on the site record but does not git-clone into
+	// siteRoot (the caller has populated it some other way).
+	SkipClone bool
 }
 
 func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
@@ -235,8 +238,10 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		}
 	}
 
-	// Clone git repo if provided
-	if opts.Repo != "" {
+	// Clone git repo if provided. SkipClone keeps the repo on the site record
+	// (so future deploys work) but leaves siteRoot untouched — used when the
+	// files are supplied another way, e.g. a physical site clone.
+	if opts.Repo != "" && !opts.SkipClone {
 		branch := opts.Branch
 		if branch == "" {
 			branch = "main"
