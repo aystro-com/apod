@@ -226,12 +226,11 @@ func (e *Engine) reconcileService(ctx context.Context, domain, svcName string, d
 			cfg.Name = replicaContainerName(domain, svcName, i)
 			cfg.Labels = cloneLabels(template.Labels)
 			cfg.Labels[labelPrefix+"replica"] = strconv.Itoa(i)
+			// Stay on the isolated site network only (no default bridge).
+			cfg.NetworkName = siteNetwork
 			id, err := e.docker.CreateContainer(ctx, cfg)
 			if err != nil {
 				return fmt.Errorf("create replica %s: %w", cfg.Name, err)
-			}
-			if err := e.docker.ConnectNetwork(ctx, siteNetwork, id); err != nil {
-				return fmt.Errorf("connect replica %s: %w", cfg.Name, err)
 			}
 			if err := e.docker.StartContainer(ctx, id); err != nil {
 				return fmt.Errorf("start replica %s: %w", cfg.Name, err)

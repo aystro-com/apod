@@ -122,6 +122,27 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		portBindings[port] = []nat.PortBinding{{HostPort: hostPort}}
 	}
 
+	hostConfig := &container.HostConfig{
+		Mounts:        mounts,
+		Resources:     resources,
+		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
+		PortBindings:  portBindings,
+		SecurityOpt:   containerSecurityOpt(cfg.Image),
+		CapDrop:       []string{"ALL"},
+		CapAdd:        []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE"},
+	}
+	netConfig := &network.NetworkingConfig{}
+	// When a network is named, create the container *on that network only* so it
+	// never joins Docker's shared default bridge — that bridge would otherwise
+	// give every container a flat L3 path to every other site's containers by
+	// raw IP. This is what keeps sites isolated from one another.
+	if cfg.NetworkName != "" {
+		hostConfig.NetworkMode = container.NetworkMode(cfg.NetworkName)
+		netConfig.EndpointsConfig = map[string]*network.EndpointSettings{
+			cfg.NetworkName: {},
+		}
+	}
+
 	resp, err := d.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:        cfg.Image,
@@ -131,16 +152,8 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 			ExposedPorts: exposedPorts,
 			User:         cfg.User,
 		},
-		&container.HostConfig{
-			Mounts:        mounts,
-			Resources:     resources,
-			RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
-			PortBindings:  portBindings,
-			SecurityOpt:   containerSecurityOpt(cfg.Image),
-			CapDrop:       []string{"ALL"},
-			CapAdd:        []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE"},
-		},
-		&network.NetworkingConfig{},
+		hostConfig,
+		netConfig,
 		nil,
 		cfg.Name,
 	)

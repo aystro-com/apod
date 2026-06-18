@@ -399,25 +399,23 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 				}
 			}
 
+			// Create the container on the site-specific isolated network only, so
+			// it never joins Docker's default bridge (which would let other sites
+			// reach it by raw IP).
 			id, err := e.docker.CreateContainer(ctx, ContainerConfig{
-				Name:     containerName,
-				Image:    svc.Image,
-				Env:      env,
-				Volumes:  volumes,
-				Labels:   labels,
-				MemoryMB: memoryMB,
-				CPUs:     cpus,
-				Command:  svc.Command,
+				Name:        containerName,
+				Image:       svc.Image,
+				Env:         env,
+				Volumes:     volumes,
+				Labels:      labels,
+				MemoryMB:    memoryMB,
+				CPUs:        cpus,
+				Command:     svc.Command,
+				NetworkName: siteNetwork,
 			})
 			if err != nil {
 				e.db.UpdateSiteStatus(opts.Domain, "error")
 				return fmt.Errorf("create container %s: %w", containerName, err)
-			}
-
-			// Connect to site-specific isolated network (not the shared apod-net)
-			if err := e.docker.ConnectNetwork(ctx, siteNetwork, id); err != nil {
-				e.db.UpdateSiteStatus(opts.Domain, "error")
-				return fmt.Errorf("connect container to network: %w", err)
 			}
 
 			if err := e.docker.StartContainer(ctx, id); err != nil {
