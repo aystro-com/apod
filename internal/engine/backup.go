@@ -65,6 +65,31 @@ func dbRestoreCommand(dbType, dbName, dbUser, dumpFile string) []string {
 	}
 }
 
+// restoreZipEntry writes one zip entry to destPath, capped at limit bytes. It
+// clears anything non-regular already at destPath (a directory or, commonly, a
+// symlink such as Laravel's public/storage) so the write does not fail — that
+// failure was previously misreported as a decompression bomb. Returns bytes
+// written.
+func restoreZipEntry(f *zip.File, destPath string, limit int64) (int64, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return 0, fmt.Errorf("open entry: %w", err)
+	}
+	defer rc.Close()
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return 0, err
+	}
+	if fi, lerr := os.Lstat(destPath); lerr == nil && !fi.Mode().IsRegular() {
+		os.RemoveAll(destPath)
+	}
+	dest, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return 0, fmt.Errorf("create %s: %w", destPath, err)
+	}
+	defer dest.Close()
+	return io.Copy(dest, io.LimitReader(rc, limit))
+}
+
 // dbVolumeDirs returns the set of top-level subdirectories under data_root that
 // hold a database service's files (derived from the driver's backed-up DB
 // services and their volume mounts). These are excluded from physical archiving
@@ -564,15 +589,15 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(siteRoot)+string(filepath.Separator)) {
 				continue
 			}
-			os.MkdirAll(filepath.Dir(destPath), 0755)
-			rc, _ := f.Open()
-			dest, _ := os.Create(destPath)
-			n, err := io.Copy(dest, io.LimitReader(rc, maxRestoreTotalBytes-written+1))
-			dest.Close()
-			rc.Close()
+			n, err := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
 			written += n
-			if err != nil || written > maxRestoreTotalBytes {
+			if written > maxRestoreTotalBytes {
 				return fmt.Errorf("restore aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
+			}
+			if err != nil {
+				// Don't abort the whole restore (the site is already stopped) for
+				// one bad entry — record it and carry on.
+				e.LogActivity(domain, "restore_warning", fmt.Sprintf("%s: %v", f.Name, err), "warning")
 			}
 		}
 		// Restore data directory (volumes)
@@ -585,15 +610,13 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(dataRoot)+string(filepath.Separator)) {
 				continue
 			}
-			os.MkdirAll(filepath.Dir(destPath), 0755)
-			rc, _ := f.Open()
-			dest, _ := os.Create(destPath)
-			n, err := io.Copy(dest, io.LimitReader(rc, maxRestoreTotalBytes-written+1))
-			dest.Close()
-			rc.Close()
+			n, err := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
 			written += n
-			if err != nil || written > maxRestoreTotalBytes {
+			if written > maxRestoreTotalBytes {
 				return fmt.Errorf("restore aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
+			}
+			if err != nil {
+				e.LogActivity(domain, "restore_warning", fmt.Sprintf("%s: %v", f.Name, err), "warning")
 			}
 		}
 		if f.Name == "metadata.json" {
