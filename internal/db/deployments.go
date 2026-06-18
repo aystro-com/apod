@@ -46,11 +46,6 @@ func (d *DB) UpdateDeploymentStatus(id int64, status string) error {
 	return err
 }
 
-func (d *DB) SetDeploymentPreviousImage(id int64, image string) error {
-	_, err := d.conn.Exec(`UPDATE deployments SET previous_image = ? WHERE id = ?`, image, id)
-	return err
-}
-
 func (d *DB) ListDeployments(siteDomain string) ([]Deployment, error) {
 	rows, err := d.conn.Query(
 		`SELECT id, site_domain, commit_hash, branch, status, previous_image, created_at FROM deployments WHERE site_domain = ? ORDER BY created_at DESC`, siteDomain,

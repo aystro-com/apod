@@ -83,13 +83,6 @@ func ValidateTerminalToken(token string) (string, error) {
 	return t.Domain, nil
 }
 
-// RevokeTerminalToken invalidates a token immediately
-func RevokeTerminalToken(token string) {
-	terminalTokensMu.Lock()
-	delete(terminalTokens, token)
-	terminalTokensMu.Unlock()
-}
-
 func cleanExpiredTokens() {
 	terminalTokensMu.Lock()
 	defer terminalTokensMu.Unlock()

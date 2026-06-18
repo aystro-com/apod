@@ -3,16 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
-	"strings"
 )
-
-func parseConfigFlag(s string) (string, string, error) {
-	parts := strings.SplitN(s, "=", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid config format: %q (expected key=value)", s)
-	}
-	return parts[0], parts[1], nil
-}
 
 func (e *Engine) SetConfig(ctx context.Context, domain string, key, value string) error {
 	if err := e.locks.Acquire(domain); err != nil {

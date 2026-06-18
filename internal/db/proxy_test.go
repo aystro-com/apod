@@ -18,12 +18,24 @@ func TestListProxyRules(t *testing.T) {
 	if len(rules) != 2 { t.Errorf("got %d, want 2", len(rules)) }
 }
 
-func TestDeleteProxyRule(t *testing.T) {
+func TestDeleteProxyRuleForSite(t *testing.T) {
 	d := openTestDB(t)
 	id, _ := d.CreateProxyRule("example.com", "redirect", `{}`)
-	d.DeleteProxyRule(id)
-	rules, _ := d.ListProxyRules("example.com")
-	if len(rules) != 0 { t.Errorf("got %d, want 0", len(rules)) }
+
+	// Another site must not delete this rule by ID (IDOR).
+	if err := d.DeleteProxyRuleForSite(id, "attacker.com"); err == nil {
+		t.Error("cross-site delete should fail")
+	}
+	if rules, _ := d.ListProxyRules("example.com"); len(rules) != 1 {
+		t.Fatalf("rule removed by cross-site delete: got %d, want 1", len(rules))
+	}
+
+	if err := d.DeleteProxyRuleForSite(id, "example.com"); err != nil {
+		t.Fatalf("DeleteProxyRuleForSite: %v", err)
+	}
+	if rules, _ := d.ListProxyRules("example.com"); len(rules) != 0 {
+		t.Errorf("got %d, want 0", len(rules))
+	}
 }
 
 func TestBlockUnblockIP(t *testing.T) {
@@ -42,7 +54,18 @@ func TestFTPAccount(t *testing.T) {
 	accounts, _ := d.ListFTPAccounts("example.com")
 	if len(accounts) != 1 { t.Errorf("got %d, want 1", len(accounts)) }
 	if accounts[0].Username != "ftpuser" { t.Errorf("got %q", accounts[0].Username) }
-	d.DeleteFTPAccount("ftpuser")
+
+	// Another site must not delete this account by username (IDOR).
+	if err := d.DeleteFTPAccountForSite("attacker.com", "ftpuser"); err == nil {
+		t.Error("cross-site FTP delete should fail")
+	}
+	if a, _ := d.ListFTPAccounts("example.com"); len(a) != 1 {
+		t.Fatalf("account removed by cross-site delete: got %d, want 1", len(a))
+	}
+
+	if err := d.DeleteFTPAccountForSite("example.com", "ftpuser"); err != nil {
+		t.Fatalf("DeleteFTPAccountForSite: %v", err)
+	}
 	accounts, _ = d.ListFTPAccounts("example.com")
 	if len(accounts) != 0 { t.Errorf("got %d, want 0", len(accounts)) }
 }

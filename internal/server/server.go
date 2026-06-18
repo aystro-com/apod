@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -271,9 +270,4 @@ func (s *Server) ListenTCPTLS(addr, certFile, keyFile string) error {
 		},
 	}
 	return srv.ListenAndServeTLS(certFile, keyFile)
-}
-
-func (s *Server) Shutdown(ctx context.Context) error {
-	os.Remove(defaultSocketPath)
-	return nil
 }

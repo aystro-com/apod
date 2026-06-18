@@ -371,10 +371,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 			return fmt.Errorf("pull image %s: %w", svc.Image, err)
 		}
 
-		var env []string
-		for k, v := range svc.Environment {
-			env = append(env, k+"="+v)
-		}
+		env := envToSlice(svc.Environment)
 
 		volumes := make(map[string]string)
 		for _, v := range svc.Volumes {

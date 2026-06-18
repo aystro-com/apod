@@ -66,18 +66,6 @@ func (d *DB) ListAllSchedules() ([]BackupSchedule, error) {
 	return schedules, nil
 }
 
-func (d *DB) DeleteSchedule(id int64) error {
-	result, err := d.conn.Exec(`DELETE FROM backup_schedules WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete schedule: %w", err)
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("schedule %d not found", id)
-	}
-	return nil
-}
-
 // DeleteScheduleForSite deletes a schedule only if it belongs to siteDomain
 // (IDOR-safe).
 func (d *DB) DeleteScheduleForSite(id int64, siteDomain string) error {

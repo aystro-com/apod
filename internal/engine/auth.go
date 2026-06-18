@@ -147,8 +147,3 @@ func (e *Engine) ValidateSessionToken(rawToken string) (*models.User, error) {
 func (e *Engine) Logout(rawToken string) error {
 	return e.db.DeleteSession(HashAPIKey(rawToken))
 }
-
-// RevokeUserSessions invalidates every session for a user.
-func (e *Engine) RevokeUserSessions(name string) error {
-	return e.db.DeleteSessionsForUser(name)
-}

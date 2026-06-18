@@ -45,11 +45,6 @@ func (d *DB) ListFTPAccounts(siteDomain string) ([]FTPAccount, error) {
 	return accounts, nil
 }
 
-func (d *DB) DeleteFTPAccount(username string) error {
-	_, err := d.conn.Exec(`DELETE FROM ftp_accounts WHERE username = ?`, username)
-	return err
-}
-
 // DeleteFTPAccountForSite deletes an FTP account only if it belongs to
 // siteDomain (IDOR-safe).
 func (d *DB) DeleteFTPAccountForSite(siteDomain, username string) error {

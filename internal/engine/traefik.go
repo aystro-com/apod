@@ -208,11 +208,7 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 func TraefikLabels(siteDomain string, domains []string, servicePort string, backendScheme string, certResolver string) map[string]string {
 	routerName := strings.ReplaceAll(siteDomain, ".", "-")
 
-	var hostRules []string
-	for _, d := range domains {
-		hostRules = append(hostRules, fmt.Sprintf("Host(`%s`)", d))
-	}
-	rule := strings.Join(hostRules, " || ")
+	rule := buildTraefikRule(domains)
 
 	labels := map[string]string{
 		"traefik.enable": "true",

@@ -28,15 +28,23 @@ func TestListCronJobs(t *testing.T) {
 	}
 }
 
-func TestDeleteCronJob(t *testing.T) {
+func TestDeleteCronJobForSite(t *testing.T) {
 	d := openTestDB(t)
 	id, _ := d.CreateCronJob("example.com", "* * * * *", "cmd1", "app")
-	err := d.DeleteCronJob(id)
-	if err != nil {
-		t.Fatalf("DeleteCronJob: %v", err)
+
+	// A different site must not be able to delete this job by ID (IDOR).
+	if err := d.DeleteCronJobForSite(id, "attacker.com"); err == nil {
+		t.Error("cross-site delete should fail")
 	}
-	jobs, _ := d.ListCronJobs("example.com")
-	if len(jobs) != 0 {
+	if jobs, _ := d.ListCronJobs("example.com"); len(jobs) != 1 {
+		t.Fatalf("job removed by cross-site delete: got %d, want 1", len(jobs))
+	}
+
+	// The owning site can delete it.
+	if err := d.DeleteCronJobForSite(id, "example.com"); err != nil {
+		t.Fatalf("DeleteCronJobForSite: %v", err)
+	}
+	if jobs, _ := d.ListCronJobs("example.com"); len(jobs) != 0 {
 		t.Errorf("got %d, want 0", len(jobs))
 	}
 }

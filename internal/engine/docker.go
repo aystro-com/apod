@@ -35,6 +35,8 @@ func (d *Docker) Close() error {
 	return d.cli.Close()
 }
 
+// Ping verifies the Docker daemon is reachable. Used by integration tests to
+// skip cleanly when no daemon is available.
 func (d *Docker) Ping(ctx context.Context) error {
 	_, err := d.cli.Ping(ctx)
 	return err

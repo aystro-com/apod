@@ -27,16 +27,23 @@ func TestListSchedules(t *testing.T) {
 	}
 }
 
-func TestDeleteSchedule(t *testing.T) {
+func TestDeleteScheduleForSite(t *testing.T) {
 	d := openTestDB(t)
 	id, _ := d.CreateSchedule("example.com", "0 0 * * *", "local", 7)
-	err := d.DeleteSchedule(id)
-	if err != nil {
-		t.Fatalf("DeleteSchedule: %v", err)
+
+	// Cross-site delete by ID must not remove another site's schedule (IDOR).
+	if err := d.DeleteScheduleForSite(id, "attacker.com"); err == nil {
+		t.Error("cross-site delete should fail")
 	}
-	schedules, _ := d.ListSchedules("example.com")
-	if len(schedules) != 0 {
-		t.Errorf("got %d schedules, want 0", len(schedules))
+	if s, _ := d.ListSchedules("example.com"); len(s) != 1 {
+		t.Fatalf("schedule removed by cross-site delete: got %d, want 1", len(s))
+	}
+
+	if err := d.DeleteScheduleForSite(id, "example.com"); err != nil {
+		t.Fatalf("DeleteScheduleForSite: %v", err)
+	}
+	if s, _ := d.ListSchedules("example.com"); len(s) != 0 {
+		t.Errorf("got %d schedules, want 0", len(s))
 	}
 }
 
