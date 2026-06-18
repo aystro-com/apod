@@ -65,7 +65,9 @@ func clientIP(r *http.Request) string {
 	if ip == "" {
 		ip = r.RemoteAddr
 	}
-	if isTrustedProxy(ip) {
+	// Honor X-Forwarded-For when the peer is a trusted proxy, or when the
+	// request came through the bundled web proxy over the local socket.
+	if isTrustedProxy(ip) || isProxiedWeb(r) {
 		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 			parts := strings.Split(forwarded, ",")
 			candidate := strings.TrimSpace(parts[len(parts)-1])
@@ -144,8 +146,10 @@ func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) htt
 	limiter := newRateLimiter(limit, window)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip rate limiting for Unix socket (admin)
-			if isUnix, _ := r.Context().Value(ctxIsUnixSocket).(bool); isUnix {
+			// Skip rate limiting for direct Unix socket access (local CLI).
+			// Requests forwarded by the web proxy are still rate limited so the
+			// login/2FA endpoints remain brute-force protected.
+			if isUnix, _ := r.Context().Value(ctxIsUnixSocket).(bool); isUnix && !isProxiedWeb(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

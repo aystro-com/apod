@@ -47,12 +47,24 @@ func UnixSocketMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// isProxiedWeb reports whether a request arrived over the local control socket
+// but was forwarded by the bundled web proxy (apod-ui), which ALWAYS sets the
+// X-Apod-Proxied header (and overwrites any client-supplied copy). Direct CLI
+// access over the socket never sets it. Proxied web requests must authenticate
+// with a real token instead of inheriting the socket's implicit admin identity,
+// otherwise anyone who can reach the public panel would have unauthenticated
+// admin access to the whole API.
+func isProxiedWeb(r *http.Request) bool {
+	return r.Header.Get("X-Apod-Proxied") != ""
+}
+
 // AuthMiddleware validates API keys for TCP connections
 func AuthMiddleware(eng *engine.Engine) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Unix socket connections are always admin
-			if isUnix, _ := r.Context().Value(ctxIsUnixSocket).(bool); isUnix {
+			// Direct Unix socket connections (local CLI) are always admin.
+			// Requests forwarded by the web proxy must still authenticate.
+			if isUnix, _ := r.Context().Value(ctxIsUnixSocket).(bool); isUnix && !isProxiedWeb(r) {
 				adminUser := &models.User{Name: "__admin__", Role: "admin"}
 				ctx := context.WithValue(r.Context(), ctxUserKey, adminUser)
 				next.ServeHTTP(w, r.WithContext(ctx))
