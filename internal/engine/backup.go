@@ -216,6 +216,9 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	if err != nil {
 		return 0, fmt.Errorf("get site: %w", err)
 	}
+	if site == nil {
+		return 0, NotFound("site %q not found", domain)
+	}
 
 	driver, err := e.drivers.Load(site.Driver)
 	if err != nil {
@@ -229,7 +232,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	if len(driver.Backup.Databases) == 0 && len(driver.Backup.Paths) == 0 {
 		_, dataRoot := e.SiteDir(site.Owner, domain)
 		if !dirHasContent(dataRoot) {
-			return 0, fmt.Errorf("nothing to back up: %q stores no data (stateless driver %q)", domain, site.Driver)
+			return 0, Invalid("nothing to back up: %q stores no data on disk and declares no databases (driver %q is stateless)", domain, site.Driver)
 		}
 	}
 

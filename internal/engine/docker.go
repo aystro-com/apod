@@ -239,6 +239,7 @@ func (d *Docker) ListContainersByLabels(ctx context.Context, labels map[string]s
 // labels. Used to render compose-managed sites, whose process model lives in
 // the running containers rather than a driver's services map.
 type SiteContainer struct {
+	Name    string
 	Service string
 	Image   string
 	Running bool
@@ -254,7 +255,12 @@ func (d *Docker) ListSiteContainers(ctx context.Context, domain string) ([]SiteC
 	}
 	out := make([]SiteContainer, 0, len(containers))
 	for _, c := range containers {
+		name := ""
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
 		out = append(out, SiteContainer{
+			Name:    name,
 			Service: c.Labels[labelPrefix+"service"],
 			Image:   c.Image,
 			Running: c.State == "running",

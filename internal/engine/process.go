@@ -77,13 +77,14 @@ func replicaContainerName(domain, svc string, i int) string {
 
 // ProcessInfo describes one process (service) of a site for the API/UI graph.
 type ProcessInfo struct {
-	Service  string `json:"service"`
-	Role     string `json:"role"`
-	Image    string `json:"image"`
-	Command  string `json:"command"`
-	Replicas int    `json:"replicas"` // desired
-	Running  int    `json:"running"`  // currently up
-	Scalable bool   `json:"scalable"`
+	Service    string   `json:"service"`
+	Role       string   `json:"role"`
+	Image      string   `json:"image"`
+	Command    string   `json:"command"`
+	Replicas   int      `json:"replicas"` // desired
+	Running    int      `json:"running"`  // currently up
+	Scalable   bool     `json:"scalable"`
+	Containers []string `json:"containers"` // actual container names
 }
 
 // ListProcesses returns the process topology of a site: each driver service with
@@ -120,22 +121,37 @@ func (e *Engine) ListProcesses(ctx context.Context, domain string) ([]ProcessInf
 		return nil
 	}
 
+	// Pull the live containers once so each service can list its actual
+	// container names (and count how many are up).
+	namesByService := map[string][]string{}
+	runningByService := map[string]int{}
+	if containers, lerr := e.docker.ListSiteContainers(ctx, domain); lerr == nil {
+		for _, c := range containers {
+			if c.Name != "" {
+				namesByService[c.Service] = append(namesByService[c.Service], c.Name)
+			}
+			if c.Running {
+				runningByService[c.Service]++
+			}
+		}
+		for svc := range namesByService {
+			sort.Strings(namesByService[svc])
+		}
+	}
+
 	var out []ProcessInfo
 	for svcName, svc := range driver.Services {
 		role := effectiveRole(svcName, svc.Role)
 		desired := resolveReplicas(role, svc.Replicas, overrideFor(svcName))
-		running := 0
-		if ids, lerr := e.serviceContainers(ctx, domain, svcName); lerr == nil {
-			running = len(ids)
-		}
 		out = append(out, ProcessInfo{
-			Service:  svcName,
-			Role:     role,
-			Image:    svc.Image,
-			Command:  svc.Command,
-			Replicas: desired,
-			Running:  running,
-			Scalable: scalableRole(role),
+			Service:    svcName,
+			Role:       role,
+			Image:      svc.Image,
+			Command:    svc.Command,
+			Replicas:   desired,
+			Running:    runningByService[svcName],
+			Scalable:   scalableRole(role),
+			Containers: namesByService[svcName],
 		})
 	}
 	return out, nil
@@ -176,6 +192,7 @@ func aggregateComposeProcesses(containers []SiteContainer, proxySvc string) []Pr
 	type agg struct {
 		image          string
 		total, running int
+		names          []string
 	}
 	byService := map[string]*agg{}
 	var order []string
@@ -194,6 +211,9 @@ func aggregateComposeProcesses(containers []SiteContainer, proxySvc string) []Pr
 		if c.Running {
 			a.running++
 		}
+		if c.Name != "" {
+			a.names = append(a.names, c.Name)
+		}
 	}
 	sort.Strings(order)
 
@@ -204,13 +224,15 @@ func aggregateComposeProcesses(containers []SiteContainer, proxySvc string) []Pr
 		if svc == proxySvc {
 			role = roleWeb
 		}
+		sort.Strings(a.names)
 		out = append(out, ProcessInfo{
-			Service:  svc,
-			Role:     role,
-			Image:    a.image,
-			Replicas: a.total,
-			Running:  a.running,
-			Scalable: false, // compose replica scaling isn't wired through apod
+			Service:    svc,
+			Role:       role,
+			Image:      a.image,
+			Replicas:   a.total,
+			Running:    a.running,
+			Scalable:   false, // compose replica scaling isn't wired through apod
+			Containers: a.names,
 		})
 	}
 	return out

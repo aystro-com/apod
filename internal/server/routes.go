@@ -1654,7 +1654,11 @@ func (h *Handler) CreateTerminalTokenHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	token, err := h.engine.CreateTerminalToken(r.Context(), domain)
+	// Optional target service (a specific container within the site). Validated
+	// against the site's own containers inside CreateTerminalToken.
+	service := r.URL.Query().Get("service")
+
+	token, err := h.engine.CreateTerminalToken(r.Context(), domain, service)
 	if err != nil {
 		respondEngineError(w, err)
 		return
@@ -1674,8 +1678,9 @@ func (h *Handler) TerminalExecHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate token (no API key needed — token IS the auth)
-	domain, err := engine.ValidateTerminalToken(req.Token)
+	// Validate token (no API key needed — token IS the auth). The target service
+	// is bound into the token, so the client can't redirect exec elsewhere.
+	domain, service, err := engine.ValidateTerminalToken(req.Token)
 	if err != nil {
 		respondError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -1687,8 +1692,8 @@ func (h *Handler) TerminalExecHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Execute in the app container
-	output, err := h.engine.ExecInSite(r.Context(), domain, req.Command)
+	// Execute in the bound container
+	output, err := h.engine.ExecInSite(r.Context(), domain, service, req.Command)
 	if err != nil {
 		respondEngineError(w, err)
 		return
