@@ -161,6 +161,15 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 		domain = meta.Domain
 	}
 
+	// The domain comes from an untrusted export archive — validate before it
+	// reaches container names, file paths, or shell commands.
+	if err := ValidateDomain(domain); err != nil {
+		return err
+	}
+	if err := ValidateOwner(owner); err != nil {
+		return err
+	}
+
 	// Create the site using the driver and config from metadata
 	err = e.CreateSite(ctx, CreateSiteOpts{
 		Domain: domain,

@@ -3,10 +3,79 @@ package server
 import (
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+// trustedProxyNets are the peer networks whose X-Forwarded-For header we trust.
+// Defaults to loopback (the typical same-host reverse-proxy case) and can be
+// extended via APOD_TRUSTED_PROXIES (comma-separated CIDRs). Without this,
+// X-Forwarded-For is attacker-controlled and trivially defeats the limiter.
+var trustedProxyNets = loadTrustedProxies()
+
+func loadTrustedProxies() []*net.IPNet {
+	nets := []*net.IPNet{}
+	for _, cidr := range []string{"127.0.0.0/8", "::1/128"} {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	for _, cidr := range strings.Split(os.Getenv("APOD_TRUSTED_PROXIES"), ",") {
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
+			continue
+		}
+		if !strings.Contains(cidr, "/") {
+			// Allow a bare IP by treating it as a /32 or /128.
+			if ip := net.ParseIP(cidr); ip != nil {
+				if ip.To4() != nil {
+					cidr += "/32"
+				} else {
+					cidr += "/128"
+				}
+			}
+		}
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}
+
+func isTrustedProxy(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, n := range trustedProxyNets {
+		if n.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientIP derives the rate-limit key. It only honors X-Forwarded-For when the
+// direct peer is a trusted proxy, and then uses the right-most (proxy-appended)
+// entry rather than the fully client-controlled left-most one.
+func clientIP(r *http.Request) string {
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+	if isTrustedProxy(ip) {
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			parts := strings.Split(forwarded, ",")
+			candidate := strings.TrimSpace(parts[len(parts)-1])
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ip
+}
 
 type rateLimiter struct {
 	mu       sync.Mutex
@@ -81,15 +150,7 @@ func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) htt
 				return
 			}
 
-			// Extract IP without port
-			ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-			if ip == "" {
-				ip = r.RemoteAddr
-			}
-			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				// Take the first IP in the chain (client IP)
-				ip = strings.TrimSpace(strings.Split(forwarded, ",")[0])
-			}
+			ip := clientIP(r)
 
 			if !limiter.allow(ip) {
 				respondError(w, http.StatusTooManyRequests, "rate limit exceeded")

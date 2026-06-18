@@ -16,6 +16,22 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// CSRF defense: reject cross-site requests. The browser sends Origin on
+// same-origin POSTs; require it to match this host.
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin === '' && isset($_SERVER['HTTP_REFERER'])) {
+    $origin = $_SERVER['HTTP_REFERER'];
+}
+$originHost = $origin !== '' ? parse_url($origin, PHP_URL_HOST) : '';
+$expectedHost = $_SERVER['HTTP_HOST'] ?? '';
+// Strip any port from the host for comparison.
+$expectedHostNoPort = preg_replace('/:\d+$/', '', $expectedHost);
+if ($originHost === '' || strcasecmp($originHost, $expectedHostNoPort) !== 0) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'error' => 'Cross-origin request blocked']);
+    exit;
+}
+
 $input = json_decode(file_get_contents('php://input'), true);
 $token = $input['token'] ?? '';
 $command = $input['command'] ?? '';
@@ -53,7 +69,8 @@ if (!$server) {
 
 $host = $server->hostname ?: $server->ipaddress;
 $port = $server->port ?: '8443';
-$url = 'http://' . $host . ':' . $port . '/api/v1/terminal/exec';
+$scheme = !empty($server->secure) ? 'https' : 'http';
+$url = $scheme . '://' . $host . ':' . $port . '/api/v1/terminal/exec';
 
 // Proxy the request
 $ch = curl_init();
@@ -61,8 +78,9 @@ curl_setopt($ch, CURLOPT_URL, $url);
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+// Verify TLS when using https — terminal commands and tokens traverse this link.
+curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
 curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
     'token' => $token,
@@ -74,7 +92,10 @@ $error = curl_error($ch);
 curl_close($ch);
 
 if ($error) {
-    echo json_encode(['ok' => false, 'error' => 'Connection failed: ' . $error]);
+    // Log details server-side; return a generic error to avoid leaking
+    // internal hostnames/ports to the customer.
+    error_log('apod terminal_proxy: connection failed: ' . $error);
+    echo json_encode(['ok' => false, 'error' => 'Connection to server failed']);
     exit;
 }
 

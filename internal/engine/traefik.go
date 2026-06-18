@@ -178,7 +178,9 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 			"apod.role":    "proxy",
 		},
 		Volumes: map[string]string{
-			"/var/run/docker.sock":      "/var/run/docker.sock",
+			// Read-only: Traefik only needs to watch the Docker API, never
+			// write to it. A writable socket is a direct host-root escape.
+			"/var/run/docker.sock":      "/var/run/docker.sock:ro",
 			"apod-letsencrypt":          "/letsencrypt",
 			"/etc/apod/traefik/dynamic": "/etc/traefik/dynamic:ro",
 		},

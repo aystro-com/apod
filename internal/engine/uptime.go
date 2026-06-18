@@ -96,13 +96,22 @@ func (uc *UptimeChecker) stopCheck(domain string) {
 }
 
 func (uc *UptimeChecker) ping(rawURL string) (bool, int, int) {
+	// Re-validate on every poll, not just at creation time: the stored URL's
+	// hostname is re-resolved here, so a one-time check at enable time cannot
+	// stop DNS-rebinding to an internal address.
+	if err := validatePublicURL(rawURL); err != nil {
+		log.Printf("uptime: refusing to poll %s: %v", rawURL, err)
+		return false, 0, 0
+	}
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{DialContext: safeDialContext},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
 				return fmt.Errorf("too many redirects")
 			}
-			return nil
+			// Validate the redirect target too.
+			return validatePublicURL(req.URL.String())
 		},
 	}
 	start := time.Now()
@@ -114,6 +123,50 @@ func (uc *UptimeChecker) ping(rawURL string) (bool, int, int) {
 	defer resp.Body.Close()
 	isUp := resp.StatusCode >= 200 && resp.StatusCode < 400
 	return isUp, resp.StatusCode, elapsed
+}
+
+// safeDialContext resolves the target host and refuses to connect to any
+// private/internal IP. Because the validated IP is what actually gets dialed,
+// this closes the TOCTOU/DNS-rebinding gap between validation and connection.
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", host, err)
+	}
+	var dialer net.Dialer
+	var lastErr error
+	for _, ipAddr := range ips {
+		if !isPublicIP(ipAddr.IP) {
+			lastErr = fmt.Errorf("refusing to connect to internal IP %s", ipAddr.IP)
+			continue
+		}
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ipAddr.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no dialable address for %s", host)
+	}
+	return nil, lastErr
+}
+
+// isPublicIP reports whether an IP is safe to connect to (not loopback,
+// private, link-local, unspecified, or multicast).
+func isPublicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	return true
 }
 
 func (uc *UptimeChecker) sendAlert(webhook, domain, status string, statusCode int) {
@@ -128,7 +181,10 @@ func (uc *UptimeChecker) sendAlert(webhook, domain, status string, statusCode in
 		"timestamp":   time.Now().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(payload)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{DialContext: safeDialContext},
+	}
 	client.Post(webhook, "application/json", bytes.NewReader(data))
 }
 
@@ -151,17 +207,28 @@ func validatePublicURL(rawURL string) error {
 	if lower == "localhost" || lower == "metadata.google.internal" || strings.HasSuffix(lower, ".internal") {
 		return fmt.Errorf("URL points to internal host")
 	}
-	// Resolve and check for private IPs
+	// If the host is a literal IP, validate it directly.
+	if litIP := net.ParseIP(host); litIP != nil {
+		if !isPublicIP(litIP) {
+			return fmt.Errorf("URL points to private/internal IP %s", host)
+		}
+		return nil
+	}
+	// Resolve and check for private IPs. Fail closed: if resolution fails we
+	// refuse rather than assume the host is external.
 	ips, err := net.LookupHost(host)
 	if err != nil {
-		return nil // allow if DNS resolution fails (might be external)
+		return fmt.Errorf("cannot resolve host %q: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("host %q did not resolve to any address", host)
 	}
 	for _, ipStr := range ips {
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
 			continue
 		}
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		if !isPublicIP(ip) {
 			return fmt.Errorf("URL resolves to private/internal IP %s", ipStr)
 		}
 	}

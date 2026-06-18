@@ -82,6 +82,14 @@ func (cm *CronManager) Reload() {
 
 // Engine methods
 func (e *Engine) AddCronJob(ctx context.Context, domain, schedule, command, service string) (int64, error) {
+	// Reject invalid schedules up front — otherwise cron.AddFunc silently
+	// drops them at load time and the job never runs.
+	if _, err := cron.ParseStandard(schedule); err != nil {
+		return 0, fmt.Errorf("invalid cron schedule %q: %w", schedule, err)
+	}
+	if command == "" {
+		return 0, fmt.Errorf("command is required")
+	}
 	id, err := e.db.CreateCronJob(domain, schedule, command, service)
 	if err != nil {
 		return 0, err
@@ -93,8 +101,9 @@ func (e *Engine) AddCronJob(ctx context.Context, domain, schedule, command, serv
 	return id, nil
 }
 
-func (e *Engine) RemoveCronJob(ctx context.Context, id int64) error {
-	if err := e.db.DeleteCronJob(id); err != nil {
+// RemoveCronJob deletes a cron job scoped to its owning site (IDOR-safe).
+func (e *Engine) RemoveCronJob(ctx context.Context, id int64, domain string) error {
+	if err := e.db.DeleteCronJobForSite(id, domain); err != nil {
 		return err
 	}
 	if e.cronManager != nil {

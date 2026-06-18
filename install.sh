@@ -28,12 +28,43 @@ if [ -z "$LATEST" ]; then
   exit 1
 fi
 
-URL="https://github.com/${REPO}/releases/download/${LATEST}/apod_${OS}_${ARCH}.tar.gz"
+ASSET="apod_${OS}_${ARCH}.tar.gz"
+URL="https://github.com/${REPO}/releases/download/${LATEST}/${ASSET}"
+CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${LATEST}/checksums.txt"
 
 echo "Downloading apod ${LATEST} for ${OS}/${ARCH}..."
 TMP=$(mktemp -d)
-curl -fsSL "$URL" -o "${TMP}/apod.tar.gz"
-tar -xzf "${TMP}/apod.tar.gz" -C "$TMP"
+curl -fsSL "$URL" -o "${TMP}/${ASSET}"
+
+# Verify the download against the release checksums.txt before installing.
+echo "Verifying checksum..."
+if curl -fsSL "$CHECKSUMS_URL" -o "${TMP}/checksums.txt" 2>/dev/null; then
+  EXPECTED=$(grep " ${ASSET}\$" "${TMP}/checksums.txt" | awk '{print $1}')
+  if [ -z "$EXPECTED" ]; then
+    echo "ERROR: ${ASSET} not listed in checksums.txt — refusing to install."
+    rm -rf "$TMP"; exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL=$(sha256sum "${TMP}/${ASSET}" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    ACTUAL=$(shasum -a 256 "${TMP}/${ASSET}" | awk '{print $1}')
+  else
+    echo "ERROR: no sha256sum/shasum available to verify download — refusing to install."
+    rm -rf "$TMP"; exit 1
+  fi
+  if [ "$EXPECTED" != "$ACTUAL" ]; then
+    echo "ERROR: checksum mismatch for ${ASSET}"
+    echo "  expected: $EXPECTED"
+    echo "  actual:   $ACTUAL"
+    rm -rf "$TMP"; exit 1
+  fi
+  echo "  ✓ checksum verified"
+else
+  echo "ERROR: could not download checksums.txt — refusing to install unverified binary."
+  rm -rf "$TMP"; exit 1
+fi
+
+tar -xzf "${TMP}/${ASSET}" -C "$TMP"
 
 echo "Installing to ${INSTALL_DIR}..."
 mv "${TMP}/${BINARY}" "${INSTALL_DIR}/${BINARY}" 2>/dev/null || sudo mv "${TMP}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
@@ -53,7 +84,9 @@ DRIVER_FILES=$(curl -fsSL "$DRIVERS_URL" 2>/dev/null | grep '"name"' | grep '.ya
 
 if [ -n "$DRIVER_FILES" ]; then
   for f in $DRIVER_FILES; do
-    curl -fsSL "https://raw.githubusercontent.com/${REPO}/master/drivers/${f}" -o "/etc/apod/drivers/${f}" 2>/dev/null && echo "  ✓ ${f}" || echo "  ✗ ${f}"
+    # Pin to the released tag (not the mutable master branch) so drivers match
+    # the installed binary and can't shift under us between fetches.
+    curl -fsSL "https://raw.githubusercontent.com/${REPO}/${LATEST}/drivers/${f}" -o "/etc/apod/drivers/${f}" 2>/dev/null && echo "  ✓ ${f}" || echo "  ✗ ${f}"
   done
 else
   echo "  Could not fetch driver list, skipping"

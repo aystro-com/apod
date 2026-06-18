@@ -15,6 +15,8 @@ import (
 var (
 	flagListen      string
 	flagTLS         bool
+	flagTLSCert     string
+	flagTLSKey      string
 	flagDBPath      string
 	flagDataDir     string
 	flagDriverDir   string
@@ -53,6 +55,13 @@ var serverCmd = &cobra.Command{
 
 		if flagListen != "" {
 			go srv.ListenSocket("")
+			if flagTLS {
+				if flagTLSCert == "" || flagTLSKey == "" {
+					return fmt.Errorf("--tls requires --tls-cert and --tls-key")
+				}
+				return srv.ListenTCPTLS(flagListen, flagTLSCert, flagTLSKey)
+			}
+			log.Printf("WARNING: serving the API over plaintext HTTP on %s — terminate TLS at a trusted proxy or pass --tls with --tls-cert/--tls-key", flagListen)
 			return srv.ListenTCP(flagListen)
 		}
 		return srv.ListenSocket("")
@@ -61,7 +70,9 @@ var serverCmd = &cobra.Command{
 
 func init() {
 	serverCmd.Flags().StringVar(&flagListen, "listen", "", "TCP address to listen on (e.g. 0.0.0.0:8443)")
-	serverCmd.Flags().BoolVar(&flagTLS, "tls", false, "Enable TLS")
+	serverCmd.Flags().BoolVar(&flagTLS, "tls", false, "Serve the TCP listener over HTTPS (requires --tls-cert and --tls-key)")
+	serverCmd.Flags().StringVar(&flagTLSCert, "tls-cert", "", "Path to TLS certificate file (PEM) for --tls")
+	serverCmd.Flags().StringVar(&flagTLSKey, "tls-key", "", "Path to TLS private key file (PEM) for --tls")
 	serverCmd.Flags().StringVar(&flagDBPath, "db", "", "Database path (default /etc/apod/apod.db)")
 	serverCmd.Flags().StringVar(&flagDataDir, "data-dir", "", "Data directory (default /var/lib/apod)")
 	serverCmd.Flags().StringVar(&flagDriverDir, "driver-dir", "", "Driver directory (default /etc/apod/drivers)")

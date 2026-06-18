@@ -17,6 +17,10 @@ import (
 	"github.com/aystro/apod/internal/storage"
 )
 
+// maxRestoreTotalBytes caps the total uncompressed bytes written during a
+// restore to bound memory/disk impact from a malicious or corrupt archive.
+const maxRestoreTotalBytes = 20 << 30 // 20 GiB
+
 func dbDumpCommand(dbType, dbName, dbUser string) []string {
 	switch dbType {
 	case "mysql":
@@ -359,6 +363,8 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 
 	siteRoot, dataRoot := e.SiteDir(site.Owner, domain)
 
+	// Guard against decompression bombs: cap total bytes written during restore.
+	var written int64
 	for _, f := range zr.File {
 		// Restore site files
 		if strings.HasPrefix(f.Name, "files/") {
@@ -373,9 +379,13 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			os.MkdirAll(filepath.Dir(destPath), 0755)
 			rc, _ := f.Open()
 			dest, _ := os.Create(destPath)
-			io.Copy(dest, rc)
+			n, err := io.Copy(dest, io.LimitReader(rc, maxRestoreTotalBytes-written+1))
 			dest.Close()
 			rc.Close()
+			written += n
+			if err != nil || written > maxRestoreTotalBytes {
+				return fmt.Errorf("restore aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
+			}
 		}
 		// Restore data directory (volumes)
 		if strings.HasPrefix(f.Name, "data/") {
@@ -390,9 +400,13 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			os.MkdirAll(filepath.Dir(destPath), 0755)
 			rc, _ := f.Open()
 			dest, _ := os.Create(destPath)
-			io.Copy(dest, rc)
+			n, err := io.Copy(dest, io.LimitReader(rc, maxRestoreTotalBytes-written+1))
 			dest.Close()
 			rc.Close()
+			written += n
+			if err != nil || written > maxRestoreTotalBytes {
+				return fmt.Errorf("restore aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
+			}
 		}
 		if f.Name == "metadata.json" {
 			rc, _ := f.Open()

@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Backup schedule operations
@@ -33,8 +35,8 @@ func (e *Engine) ListBackupSchedules(ctx context.Context, domain string) (interf
 	return e.db.ListSchedules(domain)
 }
 
-func (e *Engine) RemoveBackupSchedule(ctx context.Context, scheduleID int64) error {
-	if err := e.db.DeleteSchedule(scheduleID); err != nil {
+func (e *Engine) RemoveBackupSchedule(ctx context.Context, scheduleID int64, domain string) error {
+	if err := e.db.DeleteScheduleForSite(scheduleID, domain); err != nil {
 		return err
 	}
 	if e.scheduler != nil {
@@ -53,8 +55,49 @@ func (e *Engine) AddStorageConfig(name, driver, configJSON string) error {
 	return e.db.CreateStorageConfig(name, driver, configJSON)
 }
 
+// secretConfigKeys are storage-config fields that must never be returned to a
+// client (matched case-insensitively).
+var secretConfigKeys = map[string]bool{
+	"secret_key":        true,
+	"secret_access_key": true,
+	"access_key":        true,
+	"access_key_id":     true,
+	"password":          true,
+	"passphrase":        true,
+	"token":             true,
+	"private_key":       true,
+}
+
 func (e *Engine) ListStorageConfigs() (interface{}, error) {
-	return e.db.ListStorageConfigs()
+	configs, err := e.db.ListStorageConfigs()
+	if err != nil {
+		return nil, err
+	}
+	// Redact credentials before the configs leave the engine.
+	for i := range configs {
+		configs[i].Config = redactStorageSecrets(configs[i].Config)
+	}
+	return configs, nil
+}
+
+// redactStorageSecrets parses a storage config JSON blob and replaces any
+// secret-bearing value with a fixed mask, returning the re-serialized JSON.
+func redactStorageSecrets(configJSON string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(configJSON), &m); err != nil {
+		// Unparseable — drop it entirely rather than risk leaking secrets.
+		return "{}"
+	}
+	for k := range m {
+		if secretConfigKeys[strings.ToLower(k)] {
+			m[k] = "********"
+		}
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(out)
 }
 
 func (e *Engine) RemoveStorageConfig(name string) error {

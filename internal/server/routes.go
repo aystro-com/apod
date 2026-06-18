@@ -488,6 +488,10 @@ func (h *Handler) ListBackupSchedulesHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) RemoveBackupScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		ScheduleID int64 `json:"schedule_id"`
 	}
@@ -495,7 +499,7 @@ func (h *Handler) RemoveBackupScheduleHandler(w http.ResponseWriter, r *http.Req
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.engine.RemoveBackupSchedule(r.Context(), req.ScheduleID); err != nil {
+	if err := h.engine.RemoveBackupSchedule(r.Context(), req.ScheduleID, domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -525,6 +529,8 @@ func (h *Handler) AddStorageConfigHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) ListStorageConfigsHandler(w http.ResponseWriter, r *http.Request) {
+	// The engine redacts stored credentials (access keys, secret keys,
+	// passwords) before returning configs.
 	configs, err := h.engine.ListStorageConfigs()
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -808,6 +814,10 @@ func (h *Handler) ListCronJobsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RemoveCronJobHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		ID int64 `json:"id"`
 	}
@@ -815,7 +825,7 @@ func (h *Handler) RemoveCronJobHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.engine.RemoveCronJob(r.Context(), req.ID); err != nil {
+	if err := h.engine.RemoveCronJob(r.Context(), req.ID, domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -824,8 +834,14 @@ func (h *Handler) RemoveCronJobHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) IncomingWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
-	if err := h.engine.HandleWebhook(r.Context(), token); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+	// Limit body size to avoid memory abuse from an unauthenticated endpoint.
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	signature := r.Header.Get("X-Hub-Signature-256")
+	if signature == "" {
+		signature = r.Header.Get("X-Apod-Signature")
+	}
+	if err := h.engine.HandleWebhook(r.Context(), token, body, signature); err != nil {
+		respondError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deploying"})
@@ -991,11 +1007,15 @@ func (h *Handler) ListProxyRulesHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) RemoveProxyRuleHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	var req struct {
 		ID int64 `json:"id"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	if err := h.engine.RemoveProxyRule(r.Context(), req.ID); err != nil {
+	if err := h.engine.RemoveProxyRule(r.Context(), req.ID, domain); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

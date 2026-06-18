@@ -1,10 +1,10 @@
 package db
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type FTPAccount struct {
@@ -14,14 +14,20 @@ type FTPAccount struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-func hashPassword(password string) string {
-	h := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(h[:])
+func hashPassword(password string) (string, error) {
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(h), nil
 }
 
 func (d *DB) CreateFTPAccount(siteDomain, username, password string) error {
-	hash := hashPassword(password)
-	_, err := d.conn.Exec(`INSERT INTO ftp_accounts (site_domain, username, password_hash) VALUES (?, ?, ?)`, siteDomain, username, hash)
+	hash, err := hashPassword(password)
+	if err != nil {
+		return fmt.Errorf("hash FTP password: %w", err)
+	}
+	_, err = d.conn.Exec(`INSERT INTO ftp_accounts (site_domain, username, password_hash) VALUES (?, ?, ?)`, siteDomain, username, hash)
 	if err != nil { return fmt.Errorf("create FTP account: %w", err) }
 	return nil
 }

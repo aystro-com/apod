@@ -10,6 +10,9 @@ import (
 )
 
 func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) error {
+	if err := ValidateDomain(targetDomain); err != nil {
+		return err
+	}
 	if sourceDomain == targetDomain {
 		return fmt.Errorf("source and target domain must be different")
 	}

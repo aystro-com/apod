@@ -82,3 +82,17 @@ func (d *DB) DeleteCronJob(id int64) error {
 	}
 	return nil
 }
+
+// DeleteCronJobForSite deletes a cron job only if it belongs to siteDomain,
+// preventing cross-site deletion by ID (IDOR).
+func (d *DB) DeleteCronJobForSite(id int64, siteDomain string) error {
+	result, err := d.conn.Exec(`DELETE FROM cron_jobs WHERE id = ? AND site_domain = ?`, id, siteDomain)
+	if err != nil {
+		return fmt.Errorf("delete cron job: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("cron job %d not found", id)
+	}
+	return nil
+}

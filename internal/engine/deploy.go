@@ -24,6 +24,12 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 			branch = "main"
 		}
 	}
+	if err := ValidateBranch(branch); err != nil {
+		return err
+	}
+	if err := ValidateRepo(site.Repo); err != nil {
+		return err
+	}
 
 	driver, err := e.drivers.Load(site.Driver)
 	if err != nil {
@@ -50,11 +56,12 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 	if site.Repo != "" {
 		cmd := exec.CommandContext(ctx, "git", "-C", siteRoot, "fetch", "origin")
 		cmd.Run()
-		cmd = exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "origin/"+branch)
+		cmd = exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "--", "origin/"+branch)
 		if err := cmd.Run(); err != nil {
 			// Maybe it's not a git repo yet, try clone
 			exec.CommandContext(ctx, "rm", "-rf", siteRoot).Run()
-			cmd = exec.CommandContext(ctx, "git", "clone", "--branch", branch, site.Repo, siteRoot)
+			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--", site.Repo, siteRoot)
+			cmd = exec.CommandContext(ctx, "git", args...)
 			if err := cmd.Run(); err != nil {
 				e.LogActivity(domain, "deploy", "branch="+branch, "failed: git clone error")
 				return fmt.Errorf("git clone: %w", err)

@@ -46,6 +46,9 @@ func base64URLEncode(data []byte) string {
 
 func randomBase64(n int) string {
 	b := make([]byte, n)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failure is catastrophic — never emit a weak secret.
+		panic("apod: crypto/rand failed: " + err.Error())
+	}
 	return base64.StdEncoding.EncodeToString(b)
 }

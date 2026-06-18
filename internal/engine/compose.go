@@ -85,6 +85,116 @@ func sanitizeComposeFile(path string) error {
 	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0644)
 }
 
+// validateComposeSecurity parses a docker-compose file and rejects directives
+// that would let a service escape its container to the host. It is intentionally
+// strict about the unambiguous escape vectors and conservative elsewhere to
+// avoid breaking legitimate stacks.
+func validateComposeSecurity(composeFile string) error {
+	data, err := os.ReadFile(composeFile)
+	if err != nil {
+		return err
+	}
+
+	var compose struct {
+		Services map[string]struct {
+			Privileged  bool        `yaml:"privileged"`
+			CapAdd      []string    `yaml:"cap_add"`
+			Devices     []any       `yaml:"devices"`
+			Pid         string      `yaml:"pid"`
+			Ipc         string      `yaml:"ipc"`
+			NetworkMode string      `yaml:"network_mode"`
+			UsernsMode  string      `yaml:"userns_mode"`
+			SecurityOpt []string    `yaml:"security_opt"`
+			Volumes     []yaml.Node `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(data, &compose); err != nil {
+		return fmt.Errorf("parse compose: %w", err)
+	}
+
+	for name, svc := range compose.Services {
+		if svc.Privileged {
+			return fmt.Errorf("service %q: privileged mode is not allowed", name)
+		}
+		for _, c := range svc.CapAdd {
+			uc := strings.ToUpper(strings.TrimSpace(c))
+			if uc == "ALL" || uc == "SYS_ADMIN" || uc == "SYS_PTRACE" || uc == "SYS_MODULE" || uc == "NET_ADMIN" {
+				return fmt.Errorf("service %q: cap_add %q is not allowed", name, c)
+			}
+		}
+		if len(svc.Devices) > 0 {
+			return fmt.Errorf("service %q: host device passthrough is not allowed", name)
+		}
+		if isHostNamespace(svc.Pid) {
+			return fmt.Errorf("service %q: pid: host is not allowed", name)
+		}
+		if isHostNamespace(svc.Ipc) {
+			return fmt.Errorf("service %q: ipc: host is not allowed", name)
+		}
+		if isHostNamespace(svc.NetworkMode) {
+			return fmt.Errorf("service %q: network_mode: host is not allowed", name)
+		}
+		if isHostNamespace(svc.UsernsMode) {
+			return fmt.Errorf("service %q: userns_mode: host is not allowed", name)
+		}
+		for _, so := range svc.SecurityOpt {
+			ls := strings.ToLower(strings.ReplaceAll(so, " ", ""))
+			if strings.Contains(ls, "unconfined") || strings.Contains(ls, "seccomp=unconfined") {
+				return fmt.Errorf("service %q: security_opt %q is not allowed", name, so)
+			}
+		}
+		for _, v := range svc.Volumes {
+			if err := checkComposeVolume(name, v); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func isHostNamespace(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(strings.Trim(v, "\"'")))
+	return v == "host" || strings.HasPrefix(v, "host:")
+}
+
+// dangerousMountSources are host paths that must never be bind-mounted into a
+// tenant container (they enable container escape or host tampering).
+var dangerousMountSources = []string{
+	"/var/run/docker.sock", "/run/docker.sock", "/var/run", "/run",
+	"/", "/etc", "/root", "/proc", "/sys", "/boot", "/dev",
+	"/var/lib/docker", "/home",
+}
+
+func checkComposeVolume(service string, node yaml.Node) error {
+	var source string
+	switch node.Kind {
+	case yaml.ScalarNode:
+		// Short syntax: "source:target[:mode]"
+		parts := strings.SplitN(node.Value, ":", 2)
+		source = parts[0]
+	case yaml.MappingNode:
+		// Long syntax: { type: bind, source: /host/path, target: ... }
+		var m struct {
+			Source string `yaml:"source"`
+		}
+		if err := node.Decode(&m); err == nil {
+			source = m.Source
+		}
+	}
+	source = strings.TrimSpace(source)
+	if source == "" || !strings.HasPrefix(source, "/") {
+		// Named volumes and relative paths are fine.
+		return nil
+	}
+	clean := filepath.Clean(source)
+	for _, bad := range dangerousMountSources {
+		if clean == bad || strings.HasPrefix(clean, bad+"/") {
+			return fmt.Errorf("service %q: bind mount of host path %q is not allowed", service, source)
+		}
+	}
+	return nil
+}
+
 // discoverComposeServices reads docker-compose.yml and returns the service names.
 func discoverComposeServices(composeFile string) ([]string, error) {
 	data, err := os.ReadFile(composeFile)
@@ -261,6 +371,15 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 	composeFile := filepath.Join(compDir, "docker-compose.yml")
 	if err := sanitizeComposeFile(composeFile); err != nil {
 		return fmt.Errorf("sanitize compose file: %w", err)
+	}
+
+	// Reject compose files that request host-level privileges or escapes. The
+	// line-based sanitizer above only rewrites ports/names; this parses the
+	// YAML and refuses dangerous directives (privileged, host namespaces,
+	// SYS_ADMIN/ALL caps, docker-socket mounts) that would allow a malicious
+	// driver or repo to escape the container to host root.
+	if err := validateComposeSecurity(composeFile); err != nil {
+		return fmt.Errorf("compose security check: %w", err)
 	}
 
 	// Discover services and set up shared resource pool

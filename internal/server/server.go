@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -103,11 +104,6 @@ func New(e *engine.Engine) *Server {
 		r.Get("/sites/{domain}/backups/schedule", h.ListBackupSchedulesHandler)
 		r.Delete("/sites/{domain}/backups/schedule", h.RemoveBackupScheduleHandler)
 
-		// Storage configs
-		r.Post("/storage", h.AddStorageConfigHandler)
-		r.Get("/storage", h.ListStorageConfigsHandler)
-		r.Delete("/storage/{name}", h.RemoveStorageConfigHandler)
-
 		// Deploy
 		r.Post("/sites/{domain}/deploy", h.DeployHandler)
 		r.Post("/sites/{domain}/rollback", h.RollbackHandler)
@@ -172,6 +168,11 @@ func New(e *engine.Engine) *Server {
 		// Admin-only routes
 		r.Group(func(r chi.Router) {
 			r.Use(AdminOnlyMiddleware)
+
+			// Storage configs (contain cloud/SFTP credentials — admin only)
+			r.Post("/storage", h.AddStorageConfigHandler)
+			r.Get("/storage", h.ListStorageConfigsHandler)
+			r.Delete("/storage/{name}", h.RemoveStorageConfigHandler)
 
 			// Firewall
 			r.Get("/firewall", h.FirewallStatusHandler)
@@ -239,8 +240,21 @@ func (s *Server) ListenSocket(socketPath string) error {
 }
 
 func (s *Server) ListenTCP(addr string) error {
-	log.Printf("apod daemon listening on %s (TCP, auth required)", addr)
+	log.Printf("apod daemon listening on %s (TCP, plaintext — put a TLS proxy in front or use ListenTCPTLS)", addr)
 	return http.ListenAndServe(addr, s.router)
+}
+
+// ListenTCPTLS serves the API over HTTPS using the given certificate and key.
+func (s *Server) ListenTCPTLS(addr, certFile, keyFile string) error {
+	log.Printf("apod daemon listening on %s (TLS, auth required)", addr)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: s.router,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+	}
+	return srv.ListenAndServeTLS(certFile, keyFile)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

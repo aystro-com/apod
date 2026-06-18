@@ -128,11 +128,12 @@ func (e *Engine) consumeRecoveryCode(name, code string) bool {
 // bcrypt hashes (for storage).
 func generateRecoveryCodes() (plain, hashed []string, err error) {
 	for i := 0; i < recoveryCodeCount; i++ {
-		buf := make([]byte, 5)
+		// 16 bytes = 128 bits of entropy, well above online-brute-force range.
+		buf := make([]byte, 16)
 		if _, err := rand.Read(buf); err != nil {
 			return nil, nil, fmt.Errorf("generate recovery code: %w", err)
 		}
-		code := hex.EncodeToString(buf) // 10 hex chars
+		code := hex.EncodeToString(buf) // 32 hex chars
 		h, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
 		if err != nil {
 			return nil, nil, err

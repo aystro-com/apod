@@ -15,6 +15,12 @@ func buildTraefikRule(domains []string) string {
 }
 
 func (e *Engine) AddDomain(ctx context.Context, siteDomain, newDomain string) error {
+	// newDomain is rendered into Traefik Host(`...`) rules and must never be
+	// able to break out of the backtick (rule injection / routing hijack).
+	if err := ValidateDomain(newDomain); err != nil {
+		return err
+	}
+
 	if err := e.locks.Acquire(siteDomain); err != nil {
 		return err
 	}

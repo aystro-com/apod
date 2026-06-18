@@ -18,7 +18,10 @@ func NewLocal(baseDir string) *Local {
 }
 
 func (l *Local) Upload(_ context.Context, key string, reader io.Reader) error {
-	path := filepath.Join(l.baseDir, key)
+	path, err := safeJoin(l.baseDir, key)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
@@ -34,7 +37,10 @@ func (l *Local) Upload(_ context.Context, key string, reader io.Reader) error {
 }
 
 func (l *Local) Download(_ context.Context, key string, writer io.Writer) error {
-	path := filepath.Join(l.baseDir, key)
+	path, err := safeJoin(l.baseDir, key)
+	if err != nil {
+		return err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
@@ -47,7 +53,10 @@ func (l *Local) Download(_ context.Context, key string, writer io.Writer) error 
 }
 
 func (l *Local) Delete(_ context.Context, key string) error {
-	path := filepath.Join(l.baseDir, key)
+	path, err := safeJoin(l.baseDir, key)
+	if err != nil {
+		return err
+	}
 	return os.Remove(path)
 }
 

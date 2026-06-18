@@ -147,6 +147,19 @@ type CreateSiteOpts struct {
 }
 
 func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
+	if err := ValidateDomain(opts.Domain); err != nil {
+		return err
+	}
+	if err := ValidateOwner(opts.Owner); err != nil {
+		return err
+	}
+	if err := ValidateRepo(opts.Repo); err != nil {
+		return err
+	}
+	if err := ValidateBranch(opts.Branch); err != nil {
+		return err
+	}
+
 	if err := e.locks.Acquire(opts.Domain); err != nil {
 		return err
 	}
@@ -216,7 +229,8 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		if branch == "" {
 			branch = "main"
 		}
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", opts.Repo, siteRoot)
+		args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--", opts.Repo, siteRoot)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			e.db.UpdateSiteStatus(opts.Domain, "error")
 			return fmt.Errorf("git clone: %s: %w", string(output), err)
@@ -592,7 +606,10 @@ func parseMemoryMB(s string) int64 {
 
 func randomHex(n int) string {
 	b := make([]byte, n)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failure is catastrophic — never emit a weak secret.
+		panic("apod: crypto/rand failed: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }
 

@@ -39,3 +39,13 @@ func (d *DB) DeleteProxyRule(id int64) error {
 	if n == 0 { return fmt.Errorf("proxy rule %d not found", id) }
 	return nil
 }
+
+// DeleteProxyRuleForSite deletes a proxy rule only if it belongs to siteDomain
+// (IDOR-safe).
+func (d *DB) DeleteProxyRuleForSite(id int64, siteDomain string) error {
+	result, err := d.conn.Exec(`DELETE FROM proxy_rules WHERE id = ? AND site_domain = ?`, id, siteDomain)
+	if err != nil { return err }
+	n, _ := result.RowsAffected()
+	if n == 0 { return fmt.Errorf("proxy rule %d not found", id) }
+	return nil
+}

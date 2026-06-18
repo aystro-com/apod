@@ -238,10 +238,11 @@ function apod_ClientArea(array $params)
             $html .= '<input type="text" id="apod-terminal-input" class="form-control" placeholder="ls -la" style="font-family:monospace;flex:1" autocomplete="off">';
             $html .= '<button class="btn btn-success" id="apod-terminal-run">Run</button>';
             $html .= '</div>';
+            $jsonFlags = JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP;
             $html .= '<script>
 (function() {
-    var token = "' . $termToken . '";
-    var execUrl = "' . $execUrl . '";
+    var token = ' . json_encode($termToken, $jsonFlags) . ';
+    var execUrl = ' . json_encode($execUrl, $jsonFlags) . ';
     var serviceId = ' . intval($serviceId) . ';
     var output = document.getElementById("apod-terminal-output");
     var input = document.getElementById("apod-terminal-input");
@@ -301,16 +302,19 @@ function apod_ClientArea(array $params)
             $sid = $params['serviceid'] ?? '';
             $html .= '<thead><tr><th>ID</th><th>Storage</th><th>Size</th><th>Date</th><th>Actions</th></tr></thead><tbody>';
             foreach ($backups as $b) {
-                $bid = $b['id'] ?? '';
+                $bid = (int)($b['id'] ?? 0);
                 $size = isset($b['size_bytes']) ? round($b['size_bytes'] / 1024 / 1024, 1) . ' MB' : '-';
+                $storageName = htmlspecialchars($b['storage_name'] ?? 'local', ENT_QUOTES);
+                $createdAt = htmlspecialchars($b['created_at'] ?? '-', ENT_QUOTES);
+                $sidEnc = (int)$sid;
                 $html .= '<tr>';
                 $html .= '<td>' . $bid . '</td>';
-                $html .= '<td>' . ($b['storage_name'] ?? 'local') . '</td>';
-                $html .= '<td>' . $size . '</td>';
-                $html .= '<td>' . ($b['created_at'] ?? '-') . '</td>';
+                $html .= '<td>' . $storageName . '</td>';
+                $html .= '<td>' . htmlspecialchars($size, ENT_QUOTES) . '</td>';
+                $html .= '<td>' . $createdAt . '</td>';
                 $html .= '<td>';
-                $html .= '<a href="clientarea.php?action=productdetails&id=' . $sid . '&modop=custom&a=downloadBackup&backup_id=' . $bid . '" class="btn btn-xs btn-default">Download</a> ';
-                $html .= '<a href="#" onclick="if(confirm(\'Are you sure you want to restore this backup? This will overwrite your current site data.\')){window.location=\'clientarea.php?action=productdetails&id=' . $sid . '&modop=custom&a=restoreBackupById&backup_id=' . $bid . '\';}return false;" class="btn btn-xs btn-warning">Restore</a>';
+                $html .= '<a href="clientarea.php?action=productdetails&id=' . $sidEnc . '&modop=custom&a=downloadBackup&backup_id=' . $bid . '" class="btn btn-xs btn-default">Download</a> ';
+                $html .= '<a href="#" onclick="if(confirm(\'Are you sure you want to restore this backup? This will overwrite your current site data.\')){window.location=\'clientarea.php?action=productdetails&id=' . $sidEnc . '&modop=custom&a=restoreBackupById&backup_id=' . $bid . '\';}return false;" class="btn btn-xs btn-warning">Restore</a>';
                 $html .= '</td>';
                 $html .= '</tr>';
             }
@@ -372,14 +376,26 @@ function apod_terminalProxy()
         return;
     }
 
-    // Verify the user owns this service
+    // Require an authenticated client and verify they own this service —
+    // without the userid scope any logged-in user could exec in any container.
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    $userId = $_SESSION['uid'] ?? 0;
+    if ($userId < 1) {
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => false, 'error' => 'Not authenticated']);
+        return;
+    }
+
     $service = \WHMCS\Database\Capsule::table('tblhosting')
         ->where('id', $serviceId)
+        ->where('userid', $userId)
         ->first();
 
     if (!$service) {
         header('Content-Type: application/json');
-        echo json_encode(['ok' => false, 'error' => 'Service not found']);
+        echo json_encode(['ok' => false, 'error' => 'Access denied']);
         return;
     }
 
@@ -396,13 +412,16 @@ function apod_terminalProxy()
 
     $host = $server->hostname ?: $server->ipaddress;
     $port = $server->port ?: '8443';
-    $url = 'http://' . $host . ':' . $port . '/api/v1/terminal/exec';
+    $scheme = !empty($server->secure) ? 'https' : 'http';
+    $url = $scheme . '://' . $host . ':' . $port . '/api/v1/terminal/exec';
 
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['token' => $token, 'command' => $command]));
     $result = curl_exec($ch);
