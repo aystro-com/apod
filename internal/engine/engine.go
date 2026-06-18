@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,6 +185,13 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 	driver, err := e.drivers.Load(opts.Driver)
 	if err != nil {
 		return fmt.Errorf("load driver: %w", err)
+	}
+
+	// Validate caller-supplied parameters before anything is provisioned. Param
+	// values are expanded into driver shell commands (sh -c), .env files, and
+	// Traefik config, so an unchecked value is a command-injection vector.
+	if err := validateDriverParams(driver, opts.Params); err != nil {
+		return err
 	}
 
 	site := &models.Site{
@@ -602,6 +610,46 @@ func chownDataOwner(path, owner string) {
 		}
 		return nil
 	})
+}
+
+// paramValueRe restricts driver parameter values to a conservative safe set:
+// no shell metacharacters, quotes, whitespace, or newlines — because values are
+// interpolated into `sh -c` driver commands, .env files, and Traefik config.
+var paramValueRe = regexp.MustCompile(`^[A-Za-z0-9._/:@+-]*$`)
+
+// validateDriverParams rejects parameter values that are unsafe or that don't
+// satisfy the driver's declared constraints. Only parameters the driver
+// actually declares are honored later, so undeclared keys are ignored here.
+func validateDriverParams(driver *models.Driver, params map[string]string) error {
+	for key, def := range driver.Parameters {
+		val, ok := params[key]
+		if !ok {
+			continue // default will be used
+		}
+		if !paramValueRe.MatchString(val) {
+			return Invalid("parameter %q contains disallowed characters", key)
+		}
+		// Enforce a declared options allowlist when present.
+		if len(def.Options) > 0 {
+			allowed := false
+			for _, o := range def.Options {
+				if val == o {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return Invalid("parameter %q must be one of the allowed options", key)
+			}
+		}
+		// Enforce a declared numeric type.
+		if def.Type == "int" || def.Type == "number" {
+			if _, err := strconv.ParseFloat(val, 64); err != nil {
+				return Invalid("parameter %q must be a number", key)
+			}
+		}
+	}
+	return nil
 }
 
 func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) error {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 func parseEnvJSON(s string) (map[string]string, error) {
@@ -48,7 +50,21 @@ func removeEnv(existingJSON, key string) (string, error) {
 	return envToJSON(envs)
 }
 
+// envKeyRe is the POSIX-ish shape of a valid environment variable name.
+var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func (e *Engine) SetEnv(ctx context.Context, domain, key, value string) error {
+	// Validate the key shape and forbid CR/LF in key or value: env values are
+	// written verbatim into compose .env files (KEY=VALUE per line), so a
+	// newline would let a caller inject extra .env lines (e.g. override another
+	// service's secret) for compose-based sites.
+	if !envKeyRe.MatchString(key) {
+		return Invalid("invalid environment variable name %q", key)
+	}
+	if strings.ContainsAny(key, "\r\n") || strings.ContainsAny(value, "\r\n") {
+		return Invalid("environment values must not contain newlines")
+	}
+
 	if err := e.locks.Acquire(domain); err != nil {
 		return err
 	}
