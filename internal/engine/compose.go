@@ -606,6 +606,15 @@ func sanitizeProgressLine(s string) string {
 	return out
 }
 
+// firstLine returns the text up to the first newline — used to keep a deploy
+// failure message to a single, UI-friendly line.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 func isComposeProgressLine(line string) bool {
 	for _, kw := range composeProgressKeywords {
 		if strings.Contains(line, kw) {

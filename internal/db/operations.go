@@ -25,6 +25,14 @@ func (d *DB) LogOperation(siteDomain, action, details, result string) error {
 	return nil
 }
 
+// DeleteOperations clears a domain's activity history, so that reusing a domain
+// name (after a failed create or a destroy) starts with a clean log instead of
+// showing a previous, unrelated site's operations.
+func (d *DB) DeleteOperations(siteDomain string) error {
+	_, err := d.conn.Exec(`DELETE FROM operations WHERE site_domain = ?`, siteDomain)
+	return err
+}
+
 func (d *DB) ListOperations(siteDomain string, limit int) ([]Operation, error) {
 	rows, err := d.conn.Query(
 		`SELECT id, site_domain, action, details, result, created_at FROM operations WHERE site_domain = ? ORDER BY created_at DESC LIMIT ?`, siteDomain, limit,
