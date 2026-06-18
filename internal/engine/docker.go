@@ -367,6 +367,52 @@ func (d *Docker) execCapture(ctx context.Context, containerID string, cmd []stri
 	return outBuf.Bytes(), errBuf.Bytes(), exitCode, nil
 }
 
+// ExecWithInput runs cmd with input streamed to its stdin, returning combined
+// output. A non-zero exit is an error (with the output). Streaming via stdin
+// avoids the shell argv length limit (MAX_ARG_STRLEN, ~128 KB) that embedding a
+// payload in the command would hit — essential for restoring real-sized DB
+// dumps.
+func (d *Docker) ExecWithInput(ctx context.Context, containerID string, cmd []string, input []byte) (string, error) {
+	exec, err := d.cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create exec: %w", err)
+	}
+
+	resp, err := d.cli.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	if err != nil {
+		return "", fmt.Errorf("attach exec: %w", err)
+	}
+	defer resp.Close()
+
+	// Write stdin in the background, then signal EOF, while we drain output —
+	// avoids a deadlock if the command writes output before consuming all input.
+	writeErr := make(chan error, 1)
+	go func() {
+		_, e := resp.Conn.Write(input)
+		resp.CloseWrite()
+		writeErr <- e
+	}()
+
+	var outBuf, errBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&outBuf, &errBuf, resp.Reader); err != nil {
+		return "", fmt.Errorf("read exec output: %w", err)
+	}
+	if e := <-writeErr; e != nil {
+		return "", fmt.Errorf("write stdin: %w", e)
+	}
+
+	out := outBuf.String() + errBuf.String()
+	if inspect, ierr := d.cli.ContainerExecInspect(ctx, exec.ID); ierr == nil && inspect.ExitCode != 0 {
+		return out, fmt.Errorf("command exited %d: %s", inspect.ExitCode, strings.TrimSpace(out))
+	}
+	return out, nil
+}
+
 // dbImageRepos are official database image repositories that need gosu/su to
 // switch users, which is incompatible with no-new-privileges.
 var dbImageRepos = map[string]bool{

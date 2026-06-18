@@ -29,18 +29,19 @@ func TestDBDumpCmd(t *testing.T) {
 }
 
 func TestDBRestoreCmd(t *testing.T) {
-	// mysql restore must always use --binary-mode (this drift caused real bugs).
+	// mysql restore must always use --binary-mode (this drift caused real bugs)
+	// and read the dump from STDIN — never embed it (argv length limit).
 	for _, mode := range []dbCredMode{siteCreds, superCreds} {
-		got := joinArgv(dbRestoreCmd("mysql", "db", "user", "QkFTRTY0", mode))
+		got := joinArgv(dbRestoreCmd("mysql", "db", "user", mode))
 		if !strings.Contains(got, "--binary-mode=1") {
 			t.Errorf("mysql restore (mode %d) missing --binary-mode: %q", mode, got)
 		}
-		if !strings.Contains(got, "base64 -d") || !strings.Contains(got, "rm -f") {
-			t.Errorf("mysql restore should decode then clean up: %q", got)
+		if strings.Contains(got, "base64") || strings.Contains(got, "<") {
+			t.Errorf("restore must read stdin, not embed/redirect a file: %q", got)
 		}
 	}
 	// Postgres per-site targets the named database.
-	got := joinArgv(dbRestoreCmd("postgres", "site_db", "site_user", "X", siteCreds))
+	got := joinArgv(dbRestoreCmd("postgres", "site_db", "site_user", siteCreds))
 	if !strings.Contains(got, "-U site_user") || !strings.Contains(got, "-d site_db") {
 		t.Errorf("postgres site restore = %q", got)
 	}

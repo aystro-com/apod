@@ -169,11 +169,7 @@ func (e *Engine) cloneCompose(ctx context.Context, source *models.Site, driver *
 		if err != nil {
 			continue
 		}
-		restoreCmd := dbRestoreCmd(dbCfg.Type, "", "", base64Encode(dump), superCreds)
-		if restoreCmd == nil {
-			continue
-		}
-		e.siteExec(ctx, targetDomain, target.Owner, dbCfg.Service, true, restoreCmd)
+		e.restoreDatabase(ctx, targetDomain, target.Owner, dbCfg.Service, dbCfg.Type, "", "", true, dump)
 	}
 
 	e.LogActivity(source.Domain, "clone", fmt.Sprintf("cloned to %s", targetDomain), "success")

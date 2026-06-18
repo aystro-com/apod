@@ -68,18 +68,10 @@ func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
 	}
 
 	dbCfg := driver.Backup.Databases[0]
-	containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
 	dbName := strings.ReplaceAll(domain, ".", "_")
-	dbUser := dbName
+	isCompose := driver.Type == "compose"
 
-	// Decode and replay the dump from a temp file (avoids shell-quoting the SQL).
-	importCmd := dbRestoreCmd(dbCfg.Type, dbName, dbUser, base64Encode([]byte(dump)), siteCreds)
-	if importCmd == nil {
-		return Invalid("unsupported database type for import: %s", dbCfg.Type)
-	}
-
-	_, err = e.docker.ExecInContainer(ctx, containerName, importCmd)
-	if err != nil {
+	if err := e.restoreDatabase(ctx, domain, site.Owner, dbCfg.Service, dbCfg.Type, dbName, dbName, isCompose, []byte(dump)); err != nil {
 		return fmt.Errorf("database import: %w", err)
 	}
 

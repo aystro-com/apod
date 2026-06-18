@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -763,10 +762,6 @@ func randomHex(n int) string {
 		panic("apod: crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
-}
-
-func base64Encode(b []byte) string {
-	return base64.StdEncoding.EncodeToString(b)
 }
 
 // secretGenerators returns a map of variable names to generator functions.

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -506,6 +507,19 @@ func (e *Engine) ExecInComposeSite(ctx context.Context, domain, owner, service s
 		return "", fmt.Errorf("compose exec: %s: %w", string(output), err)
 	}
 	return string(output), nil
+}
+
+// execInComposeSiteInput runs a command in a compose service with input streamed
+// to stdin (no argv length limit), returning an error on non-zero exit.
+func (e *Engine) execInComposeSiteInput(ctx context.Context, domain, owner, service string, cmdArgs []string, input []byte) error {
+	project := composeProjectName(domain)
+	args := append([]string{"exec", "-T", service}, cmdArgs...)
+	cmd := composeCmd(ctx, project, e.composeDir(owner, domain), args...)
+	cmd.Stdin = bytes.NewReader(input)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("compose exec: %s: %w", string(out), err)
+	}
+	return nil
 }
 
 // execInComposeSiteStdout runs a command in a compose service and returns stdout

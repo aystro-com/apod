@@ -19,8 +19,6 @@ const (
 // through here, so a fix (e.g. mysql --binary-mode, capturing stdout only)
 // applies everywhere at once instead of drifting across copies.
 
-const dbImportFile = "/tmp/_apod_db_import.sql"
-
 // dbDumpCmd returns the command that writes a logical dump of the database to
 // stdout. Callers must capture stdout only (ExecCaptureStdout).
 func dbDumpCmd(dbType, dbName, dbUser string, mode dbCredMode) []string {
@@ -44,34 +42,26 @@ func dbDumpCmd(dbType, dbName, dbUser string, mode dbCredMode) []string {
 	return nil
 }
 
-// dbRestoreCmd returns the command that restores a base64-encoded dump. The dump
-// is decoded to a temp file and replayed, then removed. mysql always runs with
-// --binary-mode so dumps containing NUL bytes (binary columns, or older
-// mysqldump output) load cleanly.
-func dbRestoreCmd(dbType, dbName, dbUser, b64Dump string, mode dbCredMode) []string {
-	decode := fmt.Sprintf("echo '%s' | base64 -d > %s", b64Dump, dbImportFile)
-	cleanup := fmt.Sprintf("rm -f %s", dbImportFile)
-
-	var load string
+// dbRestoreCmd returns the command that restores a logical dump read from STDIN.
+// The caller streams the dump to the command's stdin (see restoreDatabase) so
+// there is no shell argv length limit. mysql always runs with --binary-mode so
+// dumps containing NUL bytes load cleanly.
+func dbRestoreCmd(dbType, dbName, dbUser string, mode dbCredMode) []string {
 	switch dbType {
 	case "mysql", "mariadb":
 		if mode == superCreds {
-			load = fmt.Sprintf(`mysql --binary-mode=1 -u root -p"$MYSQL_ROOT_PASSWORD" < %s`, dbImportFile)
-		} else {
-			load = fmt.Sprintf(`mysql --binary-mode=1 -u%s -p"$MYSQL_PASSWORD" %s < %s`, dbUser, dbName, dbImportFile)
+			return shc(`mysql --binary-mode=1 -u root -p"$MYSQL_ROOT_PASSWORD"`)
 		}
+		return shc(fmt.Sprintf(`mysql --binary-mode=1 -u%s -p"$MYSQL_PASSWORD" %s`, dbUser, dbName))
 	case "postgres":
 		if mode == superCreds {
-			load = fmt.Sprintf(`psql -U "${POSTGRES_USER:-postgres}" -f %s`, dbImportFile)
-		} else {
-			load = fmt.Sprintf(`psql -U %s -d %s -f %s`, dbUser, dbName, dbImportFile)
+			return shc(`psql -U "${POSTGRES_USER:-postgres}"`)
 		}
+		return shc(fmt.Sprintf(`psql -U %s -d %s`, dbUser, dbName))
 	case "mongo":
-		load = fmt.Sprintf(`mongorestore --archive=%s --drop`, dbImportFile)
-	default:
-		return nil
+		return []string{"mongorestore", "--archive", "--drop"}
 	}
-	return shc(fmt.Sprintf("%s && %s && %s", decode, load, cleanup))
+	return nil
 }
 
 // dbProbeCmd returns a cheap readiness check used to wait for a freshly-created

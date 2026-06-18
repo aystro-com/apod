@@ -47,6 +47,34 @@ func restoreZipEntry(f *zip.File, destPath string, limit int64) (int64, error) {
 	return io.Copy(dest, io.LimitReader(rc, limit))
 }
 
+// readDumpFromZip returns the decompressed logical dump for a database service
+// from a backup/export archive, or nil if it is absent.
+func readDumpFromZip(zr *zip.Reader, service, dbType string) []byte {
+	prefix := fmt.Sprintf("databases/%s_%s.sql", service, dbType)
+	for _, f := range zr.File {
+		if !strings.HasPrefix(f.Name, prefix) {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil
+		}
+		defer rc.Close()
+		var reader io.Reader = rc
+		if strings.HasSuffix(f.Name, ".gz") {
+			gz, gerr := gzip.NewReader(rc)
+			if gerr != nil {
+				return nil
+			}
+			defer gz.Close()
+			reader = gz
+		}
+		data, _ := io.ReadAll(reader)
+		return data
+	}
+	return nil
+}
+
 // dbVolumeDirs returns the set of top-level subdirectories under data_root that
 // hold a database service's files (derived from the driver's backed-up DB
 // services and their volume mounts). These are excluded from physical archiving
@@ -598,6 +626,24 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			e.docker.StartContainer(ctx, id)
 		}
 	}
+
+	// Replay the logical database dumps once the DB containers are back up. The
+	// raw datadir is intentionally not in the archive, so the dump is the only
+	// source of DB data — without this, a same-site restore silently loses it.
+	if driver != nil {
+		isCompose := driver.Type == "compose"
+		dbName := strings.ReplaceAll(domain, ".", "_")
+		for _, dbCfg := range driver.Backup.Databases {
+			dump := readDumpFromZip(zr, dbCfg.Service, dbCfg.Type)
+			if len(dump) == 0 {
+				continue
+			}
+			if err := e.restoreDatabase(ctx, domain, site.Owner, dbCfg.Service, dbCfg.Type, dbName, dbName, isCompose, dump); err != nil {
+				e.LogActivity(domain, "restore_warning", fmt.Sprintf("db %s: %v", dbCfg.Service, err), "warning")
+			}
+		}
+	}
+
 	e.db.UpdateSiteStatus(domain, "running")
 	return nil
 }

@@ -404,21 +404,7 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 				if len(dump) == 0 {
 					continue
 				}
-
-				mode := siteCreds
-				if isCompose {
-					mode = superCreds
-				}
-				importCmd := dbRestoreCmd(dbCfg.Type, dbName, dbUser, base64Encode(dump), mode)
-				if importCmd == nil {
-					break
-				}
-				if !isCompose {
-					// A freshly-created DB container can take tens of seconds to
-					// accept connections; wait so the import doesn't race init.
-					e.waitForDBReady(ctx, containerNameFor(domain, dbCfg.Service), dbCfg.Type, dbUser, dbName)
-				}
-				e.siteExec(ctx, domain, site.Owner, dbCfg.Service, isCompose, importCmd)
+				e.restoreDatabase(ctx, domain, site.Owner, dbCfg.Service, dbCfg.Type, dbName, dbUser, isCompose, dump)
 				break
 			}
 		}

@@ -68,7 +68,7 @@ func TestDbRestoreCommand(t *testing.T) {
 		{"unknown", false},
 	}
 	for _, tt := range tests {
-		cmd := dbRestoreCmd(tt.dbType, "mydb", "myuser", "QkFTRTY0", siteCreds)
+		cmd := dbRestoreCmd(tt.dbType, "mydb", "myuser", siteCreds)
 		if tt.notNil && len(cmd) == 0 {
 			t.Errorf("dbRestoreCmd(%q) returned empty", tt.dbType)
 		}
