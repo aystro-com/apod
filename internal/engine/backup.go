@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aystro/apod/internal/db"
+	"github.com/aystro/apod/internal/models"
 	"github.com/aystro/apod/internal/storage"
 )
 
@@ -64,6 +65,50 @@ func dbRestoreCommand(dbType, dbName, dbUser, dumpFile string) []string {
 	}
 }
 
+// sourceDBPassword reads the live database password from a site's DB service
+// container(s), trying the common per-engine env keys. Returns "" if no DB
+// service is declared or none expose a password.
+func (e *Engine) sourceDBPassword(ctx context.Context, domain string, driver *models.Driver) string {
+	keys := []string{"MYSQL_PASSWORD", "MARIADB_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD"}
+	for _, dbCfg := range driver.Backup.Databases {
+		cname := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
+		cfg, err := e.docker.InspectReplica(ctx, cname)
+		if err != nil {
+			continue
+		}
+		for _, key := range keys {
+			prefix := key + "="
+			for _, env := range cfg.Env {
+				if strings.HasPrefix(env, prefix) {
+					if v := strings.TrimPrefix(env, prefix); v != "" {
+						return v
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// readEnvFileValue returns the value of key from a dotenv-style file, or "" if
+// the file or key is absent. Surrounding quotes are trimmed.
+func readEnvFileValue(path, key string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	prefix := key + "="
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			v := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			v = strings.Trim(v, `"'`)
+			return v
+		}
+	}
+	return ""
+}
+
 type backupMetadata struct {
 	Domain     string            `json:"domain"`
 	Driver     string            `json:"driver"`
@@ -73,6 +118,11 @@ type backupMetadata struct {
 	Env        map[string]string `json:"env"`
 	Domains    []string          `json:"domains"`
 	CreatedAt  string            `json:"created_at"`
+	// DBPassword is the source site's database password, captured so a clone
+	// (restore-as-new-site) can keep the same credentials and restore the raw
+	// data directory as-is — instead of regenerating credentials, which would
+	// not match the restored datadir. Name/user derive from Domain.
+	DBPassword string `json:"db_password,omitempty"`
 }
 
 // backupDir returns the local backup directory for a site based on ownership.
@@ -247,6 +297,13 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		Env:        envs,
 		Domains:    domains,
 		CreatedAt:  time.Now().Format(time.RFC3339),
+		// Capture the live DB password so a clone can reuse it (see backupMetadata).
+		// The backup already contains the full database and the site's secrets, so
+		// recording the password here does not change its sensitivity.
+		DBPassword: e.sourceDBPassword(ctx, domain, driver),
+	}
+	if meta.DBPassword == "" {
+		meta.DBPassword = readEnvFileValue(filepath.Join(siteRoot, ".env"), "DB_PASSWORD")
 	}
 	metaJSON, _ := json.MarshalIndent(meta, "", "  ")
 	w, _ := zw.Create("metadata.json")

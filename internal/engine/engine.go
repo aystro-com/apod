@@ -83,13 +83,13 @@ func New(cfg Config) (*Engine, error) {
 	}
 
 	eng := &Engine{
-		db:      database,
-		docker:  docker,
-		traefik: NewTraefik(docker, tls),
-		tls:     tls,
-		drivers: NewDriverLoader(cfg.DriverDir),
-		locks:   NewLockManager(),
-		dataDir: cfg.DataDir,
+		db:            database,
+		docker:        docker,
+		traefik:       NewTraefik(docker, tls),
+		tls:           tls,
+		drivers:       NewDriverLoader(cfg.DriverDir),
+		locks:         NewLockManager(),
+		dataDir:       cfg.DataDir,
 		loginThrottle: newLoginThrottle(),
 	}
 
@@ -148,6 +148,12 @@ type CreateSiteOpts struct {
 	Branch  string
 	Params  map[string]string
 	Owner   string
+	// DBName and DBPassword, when set, override the database name/user (which
+	// otherwise derive from the domain) and the generated password. Used when
+	// cloning a site from a backup so the new site keeps the source's
+	// credentials and database name, leaving its restored data directory valid.
+	DBName     string
+	DBPassword string
 }
 
 func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
@@ -244,7 +250,13 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	}
 
 	dbPass := randomHex(16)
+	if opts.DBPassword != "" {
+		dbPass = opts.DBPassword
+	}
 	dbName := strings.ReplaceAll(opts.Domain, ".", "_")
+	if opts.DBName != "" {
+		dbName = opts.DBName
+	}
 	dbUser := dbName
 
 	vars := map[string]string{
@@ -687,16 +699,16 @@ func base64Encode(b []byte) string {
 // These are only called if the driver YAML actually references ${var_name}.
 func secretGenerators() map[string]func(vars map[string]string) string {
 	return map[string]func(vars map[string]string) string{
-		"jwt_secret":            func(v map[string]string) string { return randomBase64(30) },
-		"anon_key":              func(v map[string]string) string { return generateJWT(v["jwt_secret"], "anon") },
-		"service_role_key":      func(v map[string]string) string { return generateJWT(v["jwt_secret"], "service_role") },
-		"secret_key_base":       func(v map[string]string) string { return randomBase64(48) },
-		"vault_enc_key":         func(v map[string]string) string { return randomHex(16) },
-		"dashboard_password":    func(v map[string]string) string { return randomHex(16) },
-		"pg_meta_crypto_key":    func(v map[string]string) string { return randomBase64(24) },
-		"s3_access_key_id":      func(v map[string]string) string { return randomHex(16) },
-		"s3_access_key_secret":  func(v map[string]string) string { return randomHex(32) },
-		"logflare_public_token": func(v map[string]string) string { return randomBase64(24) },
+		"jwt_secret":             func(v map[string]string) string { return randomBase64(30) },
+		"anon_key":               func(v map[string]string) string { return generateJWT(v["jwt_secret"], "anon") },
+		"service_role_key":       func(v map[string]string) string { return generateJWT(v["jwt_secret"], "service_role") },
+		"secret_key_base":        func(v map[string]string) string { return randomBase64(48) },
+		"vault_enc_key":          func(v map[string]string) string { return randomHex(16) },
+		"dashboard_password":     func(v map[string]string) string { return randomHex(16) },
+		"pg_meta_crypto_key":     func(v map[string]string) string { return randomBase64(24) },
+		"s3_access_key_id":       func(v map[string]string) string { return randomHex(16) },
+		"s3_access_key_secret":   func(v map[string]string) string { return randomHex(32) },
+		"logflare_public_token":  func(v map[string]string) string { return randomBase64(24) },
 		"logflare_private_token": func(v map[string]string) string { return randomBase64(24) },
 	}
 }

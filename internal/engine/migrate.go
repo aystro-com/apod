@@ -128,6 +128,83 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir string) (stri
 // ImportSite creates a new site from an export zip file.
 // The zip must contain metadata.json with the site config.
 // Optionally override the domain with newDomain (empty = use domain from metadata).
+// reapplyDriverSetup re-runs a driver's setup steps against an imported site so
+// the restored application reconciles to its new environment (clearing caches
+// that pin source-specific values, fixing permissions, ensuring keys, …). Setup
+// steps are idempotent by design. Best-effort: per-step failures are ignored so
+// a single failing step does not abort an otherwise-successful import.
+func (e *Engine) reapplyDriverSetup(ctx context.Context, domain, owner, driverName, dbName, dbPass string) {
+	driver, err := e.drivers.Load(driverName)
+	if err != nil || len(driver.Setup) == 0 {
+		return
+	}
+	siteRoot, dataRoot := e.SiteDir(owner, domain)
+	vars := map[string]string{
+		"site_root":    siteRoot,
+		"data_root":    dataRoot,
+		"site_domain":  domain,
+		"site_db_name": dbName,
+		"site_db_user": dbName,
+		"site_db_pass": dbPass,
+	}
+	for _, step := range driver.Setup {
+		cmd := expandVariables(step.Command, vars)
+		cname := fmt.Sprintf("apod-%s-%s", domain, step.Service)
+		e.docker.ExecInContainerAs(ctx, cname, []string{"sh", "-c", cmd}, step.User)
+	}
+}
+
+// dbPasswordFromZip recovers DB_PASSWORD from the .env captured in a backup
+// archive (files/.env), for older backups whose metadata predates the
+// db_password field. Returns "" when absent.
+func dbPasswordFromZip(zr *zip.Reader) string {
+	for _, f := range zr.File {
+		if f.Name != "files/.env" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return ""
+		}
+		data, _ := io.ReadAll(rc)
+		rc.Close()
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "DB_PASSWORD=") {
+				v := strings.TrimSpace(strings.TrimPrefix(line, "DB_PASSWORD="))
+				return strings.Trim(v, `"'`)
+			}
+		}
+	}
+	return ""
+}
+
+// waitForDBReady polls a freshly-created database container until it accepts a
+// credentialed connection (or a timeout elapses), so a subsequent dump import
+// does not race container initialization. Best-effort: it never returns an
+// error, callers proceed regardless.
+func (e *Engine) waitForDBReady(ctx context.Context, containerName, dbType, dbUser, dbName string) {
+	var probe string
+	switch dbType {
+	case "mysql":
+		probe = fmt.Sprintf("mysql -u%s -p\"$MYSQL_PASSWORD\" -e 'SELECT 1' %s", dbUser, dbName)
+	case "postgres":
+		probe = fmt.Sprintf("psql -U %s -d %s -c 'SELECT 1'", dbUser, dbName)
+	default:
+		return
+	}
+	for i := 0; i < 45; i++ {
+		out, err := e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", probe})
+		low := strings.ToLower(out)
+		if err == nil && !strings.Contains(low, "error") &&
+			!strings.Contains(low, "denied") && !strings.Contains(low, "refused") &&
+			!strings.Contains(low, "can't connect") && !strings.Contains(low, "starting up") {
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
 func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner string) error {
 	data, err := os.ReadFile(zipPath)
 	if err != nil {
@@ -170,15 +247,31 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 		return err
 	}
 
+	// Decide how to restore the database. Preferred path: keep the source's DB
+	// credentials and name so the raw data directory in the backup restores
+	// as-is (the DB lives on an isolated per-site network, so reusing the
+	// password is not a security concern). The password comes from metadata,
+	// falling back to the .env captured in the backup for older archives.
+	srcDBPass := meta.DBPassword
+	if srcDBPass == "" {
+		srcDBPass = dbPasswordFromZip(zr)
+	}
+	preserveDB := srcDBPass != ""
+	srcDBName := strings.ReplaceAll(meta.Domain, ".", "_")
+
 	// Create the site using the driver and config from metadata
-	err = e.CreateSite(ctx, CreateSiteOpts{
+	createOpts := CreateSiteOpts{
 		Domain: domain,
 		Driver: meta.Driver,
 		RAM:    meta.RAM,
 		CPU:    meta.CPU,
 		Owner:  owner,
-	})
-	if err != nil {
+	}
+	if preserveDB {
+		createOpts.DBName = srcDBName
+		createOpts.DBPassword = srcDBPass
+	}
+	if err = e.CreateSite(ctx, createOpts); err != nil {
 		return fmt.Errorf("create site: %w", err)
 	}
 
@@ -201,6 +294,39 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 			rc.Close()
 			os.MkdirAll(compDir, 0755)
 			os.WriteFile(filepath.Join(compDir, ".env"), data, 0600)
+		}
+	}
+
+	// In the preferred (preserveDB) path we restore the raw data directory as-is
+	// and the credentials match, so nothing is skipped. Only in the legacy
+	// fallback — where the new DB initializes with fresh credentials — must we
+	// skip the source's raw datadir (it would otherwise make the container boot
+	// on a non-empty volume, skip init, and keep the old credentials) and rely
+	// on replaying the logical dump instead.
+	skipDataDirs := map[string]bool{}
+	if !preserveDB {
+		if drv, derr := e.drivers.Load(meta.Driver); derr == nil {
+			for _, dbCfg := range drv.Backup.Databases {
+				svc, ok := drv.Services[dbCfg.Service]
+				if !ok {
+					continue
+				}
+				for _, vol := range svc.Volumes {
+					host := vol
+					if i := strings.Index(host, ":"); i >= 0 {
+						host = host[:i]
+					}
+					host = strings.TrimPrefix(host, "${data_root}")
+					host = strings.TrimPrefix(host, "/")
+					if host == "" {
+						continue
+					}
+					if i := strings.Index(host, "/"); i >= 0 {
+						host = host[:i]
+					}
+					skipDataDirs[host] = true
+				}
+			}
 		}
 	}
 
@@ -227,6 +353,14 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 			if relPath == "" {
 				continue
 			}
+			top := relPath
+			if i := strings.Index(top, "/"); i >= 0 {
+				top = top[:i]
+			}
+			if skipDataDirs[top] {
+				// Database datadir: rely on fresh init + the logical dump.
+				continue
+			}
 			destPath := filepath.Join(dataRoot, relPath)
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(dataRoot)+string(filepath.Separator)) {
 				continue
@@ -240,9 +374,12 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 		}
 	}
 
-	// Import databases
+	// Import databases (legacy fallback only). In the preferred preserveDB
+	// path the raw data directory was restored as-is with matching credentials,
+	// so there is nothing to replay — and skipping it avoids a fragile reimport
+	// (NUL bytes in dumps, DB-readiness races).
 	driver, err := e.drivers.Load(meta.Driver)
-	if err == nil {
+	if err == nil && !preserveDB {
 		isCompose := driver.Type == "compose"
 		dbName := strings.ReplaceAll(domain, ".", "_")
 		dbUser := dbName
@@ -286,12 +423,17 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 				} else {
 					switch dbCfg.Type {
 					case "mysql":
-						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
+						// --binary-mode tolerates NUL bytes that mysqldump can emit.
+						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql --binary-mode=1 -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
 					case "postgres":
 						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
 					}
 					if importShell != "" {
 						containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
+						// A freshly-created DB container can take tens of seconds to
+						// accept connections; wait for readiness so the import does
+						// not race and silently no-op.
+						e.waitForDBReady(ctx, containerName, dbCfg.Type, dbUser, dbName)
 						e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", importShell})
 					}
 				}
@@ -313,7 +455,19 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 		}
 	}
 
-	// Restart containers to pick up restored files
+	// Re-run the driver's setup steps so the restored app reconciles to its new
+	// environment. Crucially this clears any cached config baked at the source
+	// (e.g. Laravel's bootstrap/cache/config.php, which pins the source DB host).
+	// Setup steps are idempotent by design.
+	reDBName := strings.ReplaceAll(domain, ".", "_")
+	reDBPass := ""
+	if preserveDB {
+		reDBName = srcDBName
+		reDBPass = srcDBPass
+	}
+	e.reapplyDriverSetup(ctx, domain, site.Owner, meta.Driver, reDBName, reDBPass)
+
+	// Restart containers to pick up restored files and cleared caches
 	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	for _, id := range ids {
 		e.docker.StopContainer(ctx, id)

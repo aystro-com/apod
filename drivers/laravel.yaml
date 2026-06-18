@@ -77,6 +77,10 @@ deploy:
     - "cd /app && composer install --no-dev --optimize-autoloader --no-interaction"
     - "cd /app && if [ -f package.json ]; then npm install && npm run build; fi"
   after_deploy:
+    # The code is only present after the clone, so ensure .env and APP_KEY exist
+    # here (the setup steps run before the first deploy, when /app is still empty).
+    - "cd /app && if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || touch .env; fi"
+    - "cd /app && if ! grep -q '^APP_KEY=base64' .env; then php artisan key:generate --force; fi"
     - "cd /app && php artisan migrate --force"
     - "cd /app && php artisan storage:link 2>/dev/null || true"
     - "cd /app && php artisan optimize 2>/dev/null || true"
