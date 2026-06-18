@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/aystro/apod/internal/engine"
@@ -258,6 +260,19 @@ func (s *Server) ListenSocket(socketPath string) error {
 	}
 
 	os.Chmod(socketPath, 0660)
+	// Optionally group-own the socket so the panel container can reach it as a
+	// dedicated NON-root group instead of gid 0 — letting apod-ui run as an
+	// unprivileged, non-allowlisted UID (see the SO_PEERCRED admin gate).
+	if grp := os.Getenv("APOD_SOCKET_GROUP"); grp != "" {
+		if g, err := user.LookupGroup(grp); err == nil {
+			if gid, perr := strconv.Atoi(g.Gid); perr == nil {
+				os.Chown(socketPath, -1, gid)
+				os.Chown(dir, -1, gid)
+			}
+		} else {
+			log.Printf("warning: APOD_SOCKET_GROUP %q not found: %v", grp, err)
+		}
+	}
 
 	log.Printf("apod daemon listening on %s", socketPath)
 	// Unix socket connections may get admin access (gated on the peer UID in

@@ -31,6 +31,18 @@ var updateHTTPClient = &http.Client{
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 20 * time.Second,
 	},
+	// Cap redirects and require every hop to stay on HTTPS — the daemon runs
+	// privileged self-update downloads, so a downgrade to http:// must be
+	// refused.
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("too many redirects")
+		}
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("refusing non-https redirect to %s", req.URL)
+		}
+		return nil
+	},
 }
 
 const (
