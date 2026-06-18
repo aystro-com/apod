@@ -15,3 +15,6 @@
 
 # Superpowers internal
 docs/superpowers/
+
+# Site export archives (test/CLI artifacts)
+*_export_*.zip
