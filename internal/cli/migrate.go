@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 
@@ -18,9 +19,10 @@ var exportCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		output, _ := cmd.Flags().GetString("output")
+		passphrase, _ := cmd.Flags().GetString("passphrase")
 
 		client := NewClient(flagRemote, flagKey)
-		body := map[string]string{"output_dir": output}
+		body := map[string]string{"output_dir": output, "passphrase": passphrase}
 		resp, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/export", args[0]), body)
 		if err != nil {
 			return err
@@ -47,17 +49,19 @@ var importCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		domain, _ := cmd.Flags().GetString("domain")
 		owner, _ := cmd.Flags().GetString("owner")
+		passphrase, _ := cmd.Flags().GetString("passphrase")
 
 		if flagRemote != "" {
-			return importRemote(args[0], domain, owner)
+			return importRemote(args[0], domain, owner, passphrase)
 		}
 
 		// Local import via API
 		client := NewClient(flagRemote, flagKey)
 		body := map[string]string{
-			"path":   args[0],
-			"domain": domain,
-			"owner":  owner,
+			"path":       args[0],
+			"domain":     domain,
+			"owner":      owner,
+			"passphrase": passphrase,
 		}
 		_, err := client.Post("/api/v1/import", body)
 		if err != nil {
@@ -72,7 +76,7 @@ var importCmd = &cobra.Command{
 	},
 }
 
-func importRemote(zipPath, domain, owner string) error {
+func importRemote(zipPath, domain, owner, passphrase string) error {
 	// For remote import, upload the file
 	f, err := os.Open(zipPath)
 	if err != nil {
@@ -83,12 +87,19 @@ func importRemote(zipPath, domain, owner string) error {
 	info, _ := f.Stat()
 	fmt.Printf("Uploading %s (%d MB)...\n", zipPath, info.Size()/1024/1024)
 
-	url := flagRemote + "/api/v1/import"
+	q := neturl.Values{}
 	if domain != "" {
-		url += "?domain=" + domain
+		q.Set("domain", domain)
 	}
 	if owner != "" {
-		url += "&owner=" + owner
+		q.Set("owner", owner)
+	}
+	if passphrase != "" {
+		q.Set("passphrase", passphrase)
+	}
+	url := flagRemote + "/api/v1/import"
+	if encoded := q.Encode(); encoded != "" {
+		url += "?" + encoded
 	}
 
 	req, _ := http.NewRequest("POST", url, f)
@@ -119,8 +130,10 @@ func importRemote(zipPath, domain, owner string) error {
 
 func init() {
 	exportCmd.Flags().StringP("output", "o", ".", "Output directory for export file")
+	exportCmd.Flags().String("passphrase", "", "Encrypt the export with this passphrase (required to import)")
 	importCmd.Flags().String("domain", "", "Override domain name (default: use domain from export)")
 	importCmd.Flags().String("owner", "", "Assign to user (default: admin-owned)")
+	importCmd.Flags().String("passphrase", "", "Passphrase to decrypt an encrypted export")
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(importCmd)
 }

@@ -16,7 +16,7 @@ import (
 
 // ExportSite creates a self-contained backup zip for migration.
 // Returns the path to the export file.
-func (e *Engine) ExportSite(ctx context.Context, domain, outputDir string) (string, error) {
+func (e *Engine) ExportSite(ctx context.Context, domain, outputDir, passphrase string) (string, error) {
 	if err := e.locks.Acquire(domain); err != nil {
 		return "", err
 	}
@@ -40,13 +40,10 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir string) (stri
 	filename := fmt.Sprintf("%s_export_%s.zip", domain, timestamp)
 	outputPath := filepath.Join(outputDir, filename)
 
-	f, err := os.Create(outputPath)
-	if err != nil {
-		return "", fmt.Errorf("create export file: %w", err)
-	}
-	defer f.Close()
-
-	zw := zip.NewWriter(f)
+	// Build the archive in memory so it can be (optionally) encrypted before it
+	// touches disk.
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
 
 	siteRoot, dataRoot := e.SiteDir(site.Owner, domain)
 	dbName := strings.ReplaceAll(domain, ".", "_")
@@ -59,17 +56,19 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir string) (stri
 		if dumpCmd == nil {
 			continue
 		}
-		output, err := e.docker.ExecInContainer(ctx, containerName, dumpCmd)
+		// Capture stdout only — stderr warnings and exec frame headers would
+		// corrupt the SQL.
+		output, err := e.docker.ExecCaptureStdout(ctx, containerName, dumpCmd)
 		if err != nil {
 			e.LogActivity(domain, "export_warning", fmt.Sprintf("db dump failed for %s: %v", dbCfg.Service, err), "warning")
 			continue
 		}
-		if len(strings.TrimSpace(output)) == 0 {
+		if len(bytes.TrimSpace(output)) == 0 {
 			continue
 		}
 		w, _ := zw.Create(fmt.Sprintf("databases/%s_%s.sql.gz", dbCfg.Service, dbCfg.Type))
 		gz := gzip.NewWriter(w)
-		gz.Write([]byte(output))
+		gz.Write(output)
 		gz.Close()
 	}
 
@@ -114,14 +113,23 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir string) (stri
 
 	zw.Close()
 
-	// Verify
-	info, _ := os.Stat(outputPath)
-	if info == nil || info.Size() < 100 {
-		os.Remove(outputPath)
-		return "", fmt.Errorf("export verification failed: file is empty")
+	payload := buf.Bytes()
+	if len(payload) < 100 {
+		return "", fmt.Errorf("export verification failed: archive is empty")
+	}
+	// Optionally encrypt the export at rest with a passphrase-derived key.
+	if passphrase != "" {
+		enc, err := encryptWithPassphrase(passphrase, payload)
+		if err != nil {
+			return "", fmt.Errorf("encrypt export: %w", err)
+		}
+		payload = enc
+	}
+	if err := os.WriteFile(outputPath, payload, 0600); err != nil {
+		return "", fmt.Errorf("write export: %w", err)
 	}
 
-	e.LogActivity(domain, "export", fmt.Sprintf("exported to %s (%d bytes)", outputPath, info.Size()), "success")
+	e.LogActivity(domain, "export", fmt.Sprintf("exported to %s (%d bytes)", outputPath, len(payload)), "success")
 	return outputPath, nil
 }
 
@@ -205,10 +213,21 @@ func (e *Engine) waitForDBReady(ctx context.Context, containerName, dbType, dbUs
 	}
 }
 
-func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner string) error {
+func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, passphrase string) error {
 	data, err := os.ReadFile(zipPath)
 	if err != nil {
 		return fmt.Errorf("read export file: %w", err)
+	}
+
+	// Decrypt a passphrase-encrypted export (a plaintext export is unchanged).
+	if isPassphraseEncrypted(data) {
+		if passphrase == "" {
+			return Invalid("this export is encrypted; a passphrase is required to import it")
+		}
+		data, err = decryptWithPassphrase(passphrase, data)
+		if err != nil {
+			return err
+		}
 	}
 
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))

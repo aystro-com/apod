@@ -509,7 +509,7 @@ func (e *Engine) CreateSiteFromBackup(ctx context.Context, backupID int64, newDo
 	}
 	tmp.Close()
 
-	if err := e.ImportSite(ctx, tmp.Name(), newDomain, owner); err != nil {
+	if err := e.ImportSite(ctx, tmp.Name(), newDomain, owner, ""); err != nil {
 		return fmt.Errorf("create site from backup: %w", err)
 	}
 	e.LogActivity(newDomain, "site_from_backup", fmt.Sprintf("from backup %d of %s", backupID, backup.SiteDomain), "success")

@@ -766,10 +766,11 @@ func (h *Handler) ExportSiteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		OutputDir string `json:"output_dir"`
+		OutputDir  string `json:"output_dir"`
+		Passphrase string `json:"passphrase"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	path, err := h.engine.ExportSite(r.Context(), domain, req.OutputDir)
+	path, err := h.engine.ExportSite(r.Context(), domain, req.OutputDir, req.Passphrase)
 	if err != nil {
 		respondEngineError(w, err)
 		return
@@ -812,8 +813,9 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 
 		domain := r.URL.Query().Get("domain")
 		owner := resolveOwner(r.URL.Query().Get("owner"))
+		passphrase := r.URL.Query().Get("passphrase")
 
-		if err := h.engine.ImportSite(r.Context(), tmpFile.Name(), domain, owner); err != nil {
+		if err := h.engine.ImportSite(r.Context(), tmpFile.Name(), domain, owner, passphrase); err != nil {
 			respondEngineError(w, err)
 			return
 		}
@@ -828,9 +830,10 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Path   string `json:"path"`
-		Domain string `json:"domain"`
-		Owner  string `json:"owner"`
+		Path       string `json:"path"`
+		Domain     string `json:"domain"`
+		Owner      string `json:"owner"`
+		Passphrase string `json:"passphrase"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -841,7 +844,7 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.engine.ImportSite(r.Context(), req.Path, req.Domain, req.Owner); err != nil {
+	if err := h.engine.ImportSite(r.Context(), req.Path, req.Domain, req.Owner, req.Passphrase); err != nil {
 		respondEngineError(w, err)
 		return
 	}

@@ -8,11 +8,92 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/crypto/scrypt"
 )
 
 // backupEncMagic prefixes encrypted backup archives so encrypted and legacy
 // plaintext backups can be told apart on read.
 const backupEncMagic = "APODENC1"
+
+// passEncMagic prefixes passphrase-encrypted exports. Exports move between hosts
+// (where the instance key is unavailable), so they use a passphrase-derived key
+// instead of the instance backup key.
+const passEncMagic = "APODENCP"
+
+// isPassphraseEncrypted reports whether data is a passphrase-encrypted archive.
+func isPassphraseEncrypted(data []byte) bool {
+	return bytes.HasPrefix(data, []byte(passEncMagic))
+}
+
+// scryptParams are deliberately strong; an export is encrypted/decrypted once.
+const (
+	scryptN = 1 << 15
+	scryptR = 8
+	scryptP = 1
+)
+
+// encryptWithPassphrase encrypts data with AES-256-GCM under a scrypt-derived
+// key, prefixing the magic, the salt and the nonce.
+func encryptWithPassphrase(passphrase string, plaintext []byte) ([]byte, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	key, err := scrypt.Key([]byte(passphrase), salt, scryptN, scryptR, scryptP, 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	out := append([]byte(passEncMagic), salt...)
+	out = append(out, nonce...)
+	return gcm.Seal(out, nonce, plaintext, nil), nil
+}
+
+// decryptWithPassphrase reverses encryptWithPassphrase. Data without the magic
+// is returned unchanged (a plaintext export).
+func decryptWithPassphrase(passphrase string, data []byte) ([]byte, error) {
+	if !isPassphraseEncrypted(data) {
+		return data, nil
+	}
+	data = data[len(passEncMagic):]
+	if len(data) < 16 {
+		return nil, fmt.Errorf("encrypted export is truncated")
+	}
+	salt, rest := data[:16], data[16:]
+	key, err := scrypt.Key([]byte(passphrase), salt, scryptN, scryptR, scryptP, 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	ns := gcm.NonceSize()
+	if len(rest) < ns {
+		return nil, fmt.Errorf("encrypted export is truncated")
+	}
+	plaintext, err := gcm.Open(nil, rest[:ns], rest[ns:], nil)
+	if err != nil {
+		return nil, Invalid("could not decrypt export (wrong passphrase?)")
+	}
+	return plaintext, nil
+}
 
 // backupKey returns the instance's backup encryption key, generating and
 // persisting a fresh 32-byte key (AES-256) on first use. The key lives in the
