@@ -225,6 +225,49 @@ func (h *Handler) ListDrivers(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, drivers)
 }
 
+func (h *Handler) GetDriverHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	content, err := h.engine.GetDriverContent(name)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"name":    name,
+		"yaml":    content,
+		"builtin": h.engine.DriverIsBuiltin(name),
+	})
+}
+
+func (h *Handler) SaveDriverHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+		YAML string `json:"yaml"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" || req.YAML == "" {
+		respondError(w, http.StatusBadRequest, "name and yaml are required")
+		return
+	}
+	if err := h.engine.SaveDriver(req.Name, req.YAML); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "saved", "name": req.Name})
+}
+
+func (h *Handler) DeleteDriverHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := h.engine.DeleteDriver(name); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (h *Handler) AddDomain(w http.ResponseWriter, r *http.Request) {
 	siteDomain := chi.URLParam(r, "domain")
 	if !h.checkSiteAccess(w, r, siteDomain) {
@@ -1177,6 +1220,41 @@ func (h *Handler) FirewallDenyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "denied", "port": req.Port})
+}
+
+func (h *Handler) FirewallRulesHandler(w http.ResponseWriter, r *http.Request) {
+	rules, err := h.engine.FirewallRules(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, rules)
+}
+
+func (h *Handler) FirewallAllowFromHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source string `json:"source"`
+		Port   string `json:"port"`
+		Proto  string `json:"proto"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.FirewallAllowFrom(r.Context(), req.Source, req.Port, req.Proto); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "allowed", "source": req.Source})
+}
+
+func (h *Handler) FirewallDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Num int `json:"num"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.FirewallDelete(r.Context(), req.Num); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // SSH Keys

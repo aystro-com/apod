@@ -592,6 +592,34 @@ func (e *Engine) ListDrivers() ([]models.Driver, error) {
 	return e.drivers.List()
 }
 
+// GetDriverContent returns the raw YAML for a driver.
+func (e *Engine) GetDriverContent(name string) (string, error) {
+	return e.drivers.GetContent(name)
+}
+
+// SaveDriver validates and stores a (custom) driver definition.
+func (e *Engine) SaveDriver(name, content string) error {
+	if err := e.drivers.Save(name, content); err != nil {
+		return err
+	}
+	e.LogActivity("server", "driver_save", name, "success")
+	return nil
+}
+
+// DeleteDriver removes a custom driver (built-ins are protected).
+func (e *Engine) DeleteDriver(name string) error {
+	if err := e.drivers.Delete(name); err != nil {
+		return err
+	}
+	e.LogActivity("server", "driver_delete", name, "success")
+	return nil
+}
+
+// DriverIsBuiltin reports whether a driver name is a shipped built-in.
+func (e *Engine) DriverIsBuiltin(name string) bool {
+	return e.drivers.IsBuiltin(name)
+}
+
 func (e *Engine) GetDBVersion() int {
 	return e.db.CurrentVersion()
 }

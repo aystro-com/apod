@@ -2,7 +2,9 @@ package engine
 
 import (
 	"fmt"
+	"net"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -83,6 +85,59 @@ func ValidateRepo(repo string) error {
 		return nil
 	}
 	return fmt.Errorf("invalid repository URL: only http(s) and ssh remotes are allowed")
+}
+
+// ValidatePortNumber accepts a single TCP/UDP port (1-65535).
+func ValidatePortNumber(port string) error {
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("invalid port %q: must be 1-65535", port)
+	}
+	return nil
+}
+
+var ufwPortPattern = regexp.MustCompile(`^[0-9]{1,5}(:[0-9]{1,5})?(/(tcp|udp))?$`)
+
+// ValidateUFWPort accepts a ufw port spec: a port or port range, optionally
+// with a /tcp or /udp suffix (e.g. "80", "6000:6010/tcp").
+func ValidateUFWPort(port string) error {
+	if !ufwPortPattern.MatchString(port) {
+		return fmt.Errorf("invalid port %q", port)
+	}
+	for _, p := range strings.FieldsFunc(strings.SplitN(port, "/", 2)[0], func(r rune) bool { return r == ':' }) {
+		if err := ValidatePortNumber(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateProto accepts an empty protocol (any), "tcp" or "udp".
+func ValidateProto(proto string) error {
+	switch proto {
+	case "", "tcp", "udp":
+		return nil
+	}
+	return fmt.Errorf("invalid protocol %q: must be tcp or udp", proto)
+}
+
+// ValidateIPOrCIDR accepts a single IP address or a CIDR range, or the literal
+// "any". Used for firewall source allowlists.
+func ValidateIPOrCIDR(source string) error {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return fmt.Errorf("source is required")
+	}
+	if strings.EqualFold(source, "any") {
+		return nil
+	}
+	if net.ParseIP(source) != nil {
+		return nil
+	}
+	if _, _, err := net.ParseCIDR(source); err == nil {
+		return nil
+	}
+	return fmt.Errorf("invalid source %q: must be an IP, CIDR, or 'any'", source)
 }
 
 // gitHardeningArgs returns global git config flags that disable dangerous

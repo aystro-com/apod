@@ -176,9 +176,17 @@ func New(e *engine.Engine) *Server {
 
 			// Firewall
 			r.Get("/firewall", h.FirewallStatusHandler)
+			r.Get("/firewall/rules", h.FirewallRulesHandler)
 			r.Post("/firewall/enable", h.FirewallEnableHandler)
 			r.Post("/firewall/allow", h.FirewallAllowHandler)
+			r.Post("/firewall/allow-from", h.FirewallAllowFromHandler)
 			r.Post("/firewall/deny", h.FirewallDenyHandler)
+			r.Post("/firewall/delete", h.FirewallDeleteHandler)
+
+			// Custom drivers (admin-managed driver definitions)
+			r.Get("/drivers/{name}", h.GetDriverHandler)
+			r.Post("/drivers", h.SaveDriverHandler)
+			r.Delete("/drivers/{name}", h.DeleteDriverHandler)
 
 			// SSH Keys
 			r.Post("/ssh-keys", h.AddSSHKeyHandler)
