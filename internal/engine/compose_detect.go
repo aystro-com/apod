@@ -13,6 +13,25 @@ import (
 // point when auto-detecting which compose service apod should route to.
 var preferredWebPorts = []string{"80", "8080", "443", "8000", "3000", "5000"}
 
+// apodDriverVariables are template variables that only exist in apod driver
+// definitions, never in a stock docker-compose file. Their presence means the
+// user pasted a driver into the compose field.
+var apodDriverVariables = []string{
+	"${site_root}", "${data_root}", "${site_domain}",
+	"${site_db_name}", "${site_db_user}", "${site_db_pass}",
+}
+
+// apodDriverVariable returns the first apod driver variable found in the
+// content, or "" if none — used to detect a driver pasted as a compose file.
+func apodDriverVariable(content string) string {
+	for _, v := range apodDriverVariables {
+		if strings.Contains(content, v) {
+			return v
+		}
+	}
+	return ""
+}
+
 type composePortsDoc struct {
 	Services map[string]struct {
 		Ports  []yaml.Node `yaml:"ports"`

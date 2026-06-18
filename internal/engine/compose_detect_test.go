@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseShortPort(t *testing.T) {
 	cases := map[string]string{
@@ -17,6 +20,36 @@ func TestParseShortPort(t *testing.T) {
 		if got := parseShortPort(in); got != want {
 			t.Errorf("parseShortPort(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestApodDriverVariable(t *testing.T) {
+	driver := "services:\n  app:\n    volumes:\n      - \"${site_root}:/html\"\n"
+	if v := apodDriverVariable(driver); v != "${site_root}" {
+		t.Errorf("should detect apod driver var, got %q", v)
+	}
+	// A stock compose file with its own ${VAR} interpolation is NOT flagged.
+	compose := "services:\n  web:\n    image: nginx\n    environment:\n      HOST: ${HOSTNAME}\n"
+	if v := apodDriverVariable(compose); v != "" {
+		t.Errorf("plain compose should not be flagged, got %q", v)
+	}
+}
+
+func TestComposeFailureMessage(t *testing.T) {
+	tail := []string{
+		`The "site_root" variable is not set. Defaulting to a blank string.`,
+		`The "site_root" variable is not set. Defaulting to a blank string.`,
+		"invalid spec: :/usr/share/nginx/html:ro: empty section between colons",
+	}
+	got := composeFailureMessage(tail)
+	if !strings.Contains(got, "invalid spec") {
+		t.Errorf("should surface the real error line, got %q", got)
+	}
+	if strings.Contains(got, "variable is not set") {
+		t.Errorf("interpolation warning should be skipped, got %q", got)
+	}
+	if composeFailureMessage(nil) == "" {
+		t.Error("empty tail should still yield a message")
 	}
 }
 

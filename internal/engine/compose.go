@@ -332,6 +332,13 @@ func (e *Engine) CreateSiteFromCompose(ctx context.Context, opts CreateSiteOpts,
 	if strings.TrimSpace(composeContent) == "" {
 		return Invalid("compose file is empty")
 	}
+	// A common mistake is pasting an apod *driver* into the compose box. Driver
+	// YAML references apod variables (${site_root}, …) that docker compose would
+	// try to interpolate and fail on — detect it and point the user at the right
+	// option instead of letting it die deep inside `docker compose up`.
+	if v := apodDriverVariable(composeContent); v != "" {
+		return Invalid("this looks like an apod driver, not a docker-compose file — it references %s, which Compose doesn't understand. Use the Driver option, or paste a plain docker-compose.yml.", v)
+	}
 	// Fail fast with a clear message if no web service can be routed.
 	svc, port, err := composeWebTarget([]byte(composeContent))
 	if err != nil {
@@ -658,11 +665,36 @@ func (e *Engine) composeUpStreaming(ctx context.Context, domain, project, compDi
 
 	if err := cmd.Wait(); err != nil {
 		mu.Lock()
-		out := strings.Join(tail, "; ")
+		msg := composeFailureMessage(tail)
 		mu.Unlock()
-		return fmt.Errorf("docker compose up: %s: %w", out, err)
+		// A failed `docker compose up` is almost always the user's compose file
+		// (bad image, invalid volume, port clash). Surface it as a client error
+		// so the real reason reaches them instead of a masked 500.
+		return Invalid("docker compose failed: %s", msg)
 	}
 	return nil
+}
+
+// composeFailureMessage picks the most useful line from the tail of compose's
+// output — the last line that looks like an error — falling back to the last
+// line. Interpolation warnings are skipped so the actual failure shows through.
+func composeFailureMessage(tail []string) string {
+	errKeywords := []string{"invalid", "error", "failed", "no such", "denied", "not found", "cannot", "unable"}
+	for i := len(tail) - 1; i >= 0; i-- {
+		low := strings.ToLower(tail[i])
+		if strings.Contains(low, "variable is not set") {
+			continue // skip interpolation warnings
+		}
+		for _, kw := range errKeywords {
+			if strings.Contains(low, kw) {
+				return tail[i]
+			}
+		}
+	}
+	if len(tail) > 0 {
+		return tail[len(tail)-1]
+	}
+	return "see server logs for details"
 }
 
 // StopComposeSite stops a compose-based site
