@@ -21,9 +21,15 @@ func (e ProgressEvent) Terminal() bool {
 	return e.Status == "error" || e.Percent >= 100
 }
 
+// progressRetention is how long a finished deployment's events are kept so a
+// page reload can still replay them, after which the buffer is freed.
+const progressRetention = 2 * time.Minute
+
 // progressHub is an in-memory pub/sub of deployment progress, keyed by domain.
 // It buffers events so a subscriber that connects mid-deploy (or just after it
 // finishes) still replays the full sequence, then receives live updates.
+// Buffers are freed shortly after a deploy ends so memory does not grow with
+// the number of sites ever deployed.
 type progressHub struct {
 	mu      sync.Mutex
 	buffers map[string][]ProgressEvent
@@ -71,6 +77,23 @@ func (h *progressHub) Emit(domain string, ev ProgressEvent) {
 		default: // a slow consumer never blocks the deploy; it has the replay buffer
 		}
 	}
+
+	// Once a deploy ends, free its buffer after a short retention window so the
+	// hub does not accumulate one buffer per site forever.
+	if ev.Terminal() {
+		time.AfterFunc(progressRetention, func() { h.forget(domain) })
+	}
+}
+
+// forget releases a domain's buffer (and any empty subscriber set) once its
+// retention window has elapsed.
+func (h *progressHub) forget(domain string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.buffers, domain)
+	if len(h.subs[domain]) == 0 {
+		delete(h.subs, domain)
+	}
 }
 
 // Subscribe returns a replay of everything emitted so far for the domain, a
@@ -90,6 +113,9 @@ func (h *progressHub) Subscribe(domain string) (replay []ProgressEvent, ch <-cha
 		if _, ok := h.subs[domain][c]; ok {
 			delete(h.subs[domain], c)
 			close(c)
+		}
+		if len(h.subs[domain]) == 0 {
+			delete(h.subs, domain) // don't keep empty per-domain maps around
 		}
 	}
 	return replay, c, cancel

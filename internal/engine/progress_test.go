@@ -39,6 +39,39 @@ func TestProgressHubBeginClearsBuffer(t *testing.T) {
 	}
 }
 
+func TestProgressHubForgetFreesMemory(t *testing.T) {
+	h := newProgressHub()
+	h.Emit("ex.com", ProgressEvent{Step: "Ready", Status: "done", Percent: 100})
+
+	// The retention cleanup frees the buffer so the hub doesn't grow per-site.
+	h.forget("ex.com")
+
+	replay, _, cancel := h.Subscribe("ex.com")
+	defer cancel()
+	if len(replay) != 0 {
+		t.Errorf("forget should free the buffer, got %d events", len(replay))
+	}
+
+	h.mu.Lock()
+	_, hasBuf := h.buffers["ex.com"]
+	h.mu.Unlock()
+	if hasBuf {
+		t.Error("buffer entry should be deleted after forget")
+	}
+}
+
+func TestProgressHubCancelDropsEmptyDomain(t *testing.T) {
+	h := newProgressHub()
+	_, _, cancel := h.Subscribe("ex.com")
+	cancel()
+	h.mu.Lock()
+	_, has := h.subs["ex.com"]
+	h.mu.Unlock()
+	if has {
+		t.Error("empty subscriber set should be removed on cancel")
+	}
+}
+
 func TestProgressHubIsolatesDomains(t *testing.T) {
 	h := newProgressHub()
 	h.Emit("a.com", ProgressEvent{Step: "a"})

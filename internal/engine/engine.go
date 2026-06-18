@@ -539,6 +539,13 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	}
 	defer e.locks.Release(domain)
 
+	// Stop any uptime monitoring first so its ticker goroutine doesn't outlive
+	// the site (it would otherwise keep pinging a destroyed domain forever).
+	if e.uptimeChecker != nil {
+		e.uptimeChecker.stopCheck(domain)
+	}
+	e.db.DeleteUptimeCheck(domain)
+
 	// Check if this is a compose site
 	site, _ := e.db.GetSite(domain)
 	if site != nil {
