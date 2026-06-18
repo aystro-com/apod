@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aystro/apod/internal/engine"
+	"github.com/aystro/apod/internal/models"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -319,13 +320,41 @@ func (h *Handler) DestroySite(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "destroyed"})
 }
 
+// driverSummary is the slim, explicitly-tagged view of a driver returned to the
+// UI. models.Driver has only yaml tags, so marshaling it directly produced
+// capitalised JSON keys ("Name") the UI couldn't read — and leaked every
+// driver's full internals (images, services, deploy hooks) into a dropdown.
+type driverSummary struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+}
+
+func summarizeDrivers(drivers []models.Driver) []driverSummary {
+	out := make([]driverSummary, 0, len(drivers))
+	for _, d := range drivers {
+		t := d.Type
+		if t == "" {
+			t = "services"
+		}
+		out = append(out, driverSummary{
+			Name:        d.Name,
+			Version:     d.Version,
+			Description: d.Description,
+			Type:        t,
+		})
+	}
+	return out
+}
+
 func (h *Handler) ListDrivers(w http.ResponseWriter, r *http.Request) {
 	drivers, err := h.engine.ListDrivers()
 	if err != nil {
 		respondEngineError(w, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, drivers)
+	respondJSON(w, http.StatusOK, summarizeDrivers(drivers))
 }
 
 func (h *Handler) GetDriverHandler(w http.ResponseWriter, r *http.Request) {
