@@ -71,9 +71,21 @@ func (e *Engine) RemoveProxyRule(ctx context.Context, id int64, domain string) e
 	return e.db.DeleteProxyRuleForSite(id, domain)
 }
 
+// AllowIP adds the IP/CIDR to the site's allowlist. Once a site has any allow
+// rule, only listed sources may reach it (enforced via a Traefik ipWhiteList
+// middleware materialized by ApplyIPRules).
+func (e *Engine) AllowIP(ctx context.Context, domain, ip string) error {
+	if err := validateIPRule(ip); err != nil { return err }
+	if err := e.db.AddIPRule(domain, ip, "allow"); err != nil { return err }
+	if err := e.ApplyIPRules(domain); err != nil { return err }
+	e.LogActivity(domain, "ip_allow", ip, "success")
+	return nil
+}
+
 func (e *Engine) BlockIP(ctx context.Context, domain, ip string) error {
 	if err := validateIPRule(ip); err != nil { return err }
 	if err := e.db.BlockIP(domain, ip); err != nil { return err }
+	if err := e.ApplyIPRules(domain); err != nil { return err }
 	e.LogActivity(domain, "ip_block", ip, "success")
 	return nil
 }
@@ -81,6 +93,7 @@ func (e *Engine) BlockIP(ctx context.Context, domain, ip string) error {
 func (e *Engine) UnblockIP(ctx context.Context, domain, ip string) error {
 	if err := validateIPRule(ip); err != nil { return err }
 	if err := e.db.UnblockIP(domain, ip); err != nil { return err }
+	if err := e.ApplyIPRules(domain); err != nil { return err }
 	e.LogActivity(domain, "ip_unblock", ip, "success")
 	return nil
 }

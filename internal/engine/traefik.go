@@ -234,5 +234,12 @@ func TraefikLabels(siteDomain string, domains []string, servicePort string, back
 		labels[fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.scheme", routerName)] = backendScheme
 	}
 
+	// Attach the per-site IP allowlist middleware (file provider) when
+	// enforcement is enabled. ApplyIPRules always writes the referenced file,
+	// defaulting to allow-all, so the reference never dangles.
+	if ipRulesEnforced() {
+		labels[fmt.Sprintf("traefik.http.routers.%s.middlewares", routerName)] = ipAllowMiddlewareName(siteDomain) + "@file"
+	}
+
 	return labels
 }

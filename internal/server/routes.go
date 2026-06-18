@@ -1082,7 +1082,23 @@ func (h *Handler) RemoveProxyRuleHandler(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
-// IP blocking
+// IP allow/block (per site)
+func (h *Handler) AllowIPHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	var req struct {
+		IP string `json:"ip"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if err := h.engine.AllowIP(r.Context(), domain, req.IP); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "allowed", "ip": req.IP})
+}
+
 func (h *Handler) BlockIPHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
 	if !h.checkSiteAccess(w, r, domain) {

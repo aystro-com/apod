@@ -14,11 +14,26 @@ type IPRule struct {
 }
 
 func (d *DB) BlockIP(siteDomain, ip string) error {
-	_, err := d.conn.Exec(`INSERT INTO ip_rules (site_domain, ip, action) VALUES (?, ?, 'block')`, siteDomain, ip)
-	if err != nil { return fmt.Errorf("block IP: %w", err) }
+	return d.AddIPRule(siteDomain, ip, "block")
+}
+
+// AddIPRule inserts an allow or block rule for a site. A given IP has at most
+// one rule per site, so an existing rule for the same IP is replaced.
+func (d *DB) AddIPRule(siteDomain, ip, action string) error {
+	if action != "allow" && action != "block" {
+		return fmt.Errorf("invalid action %q", action)
+	}
+	if _, err := d.conn.Exec(`DELETE FROM ip_rules WHERE site_domain = ? AND ip = ?`, siteDomain, ip); err != nil {
+		return fmt.Errorf("replace IP rule: %w", err)
+	}
+	if _, err := d.conn.Exec(`INSERT INTO ip_rules (site_domain, ip, action) VALUES (?, ?, ?)`, siteDomain, ip, action); err != nil {
+		return fmt.Errorf("add IP rule: %w", err)
+	}
 	return nil
 }
 
+// UnblockIP removes any rule for the given IP on a site. Scoped to site_domain
+// so it cannot affect another tenant's rules.
 func (d *DB) UnblockIP(siteDomain, ip string) error {
 	_, err := d.conn.Exec(`DELETE FROM ip_rules WHERE site_domain = ? AND ip = ?`, siteDomain, ip)
 	return err

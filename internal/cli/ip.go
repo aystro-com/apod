@@ -11,6 +11,21 @@ import (
 
 var ipCmd = &cobra.Command{Use: "ip", Short: "Manage IP rules"}
 
+var ipAllowCmd = &cobra.Command{
+	Use:   "allow [domain] [ip]",
+	Short: "Allow a source IP/CIDR (allowlist mode — once set, only allowed IPs reach the site)",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client := NewClient(flagRemote, flagKey)
+		body := map[string]string{"ip": args[1]}
+		if _, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/ip/allow", args[0]), body); err != nil {
+			return err
+		}
+		fmt.Printf("IP %s allowed for %s\n", args[1], args[0])
+		return nil
+	},
+}
+
 var ipBlockCmd = &cobra.Command{
 	Use:  "block [domain] [ip]",
 	Short: "Block an IP",
@@ -73,6 +88,6 @@ var ipListCmd = &cobra.Command{
 }
 
 func init() {
-	ipCmd.AddCommand(ipBlockCmd, ipUnblockCmd, ipListCmd)
+	ipCmd.AddCommand(ipAllowCmd, ipBlockCmd, ipUnblockCmd, ipListCmd)
 	rootCmd.AddCommand(ipCmd)
 }

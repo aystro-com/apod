@@ -2,6 +2,7 @@ package engine
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +121,24 @@ func TestDriverSaveContainment(t *testing.T) {
 	// The file must live directly under the driver dir.
 	if _, err := filepath.Rel(dir, filepath.Join(dir, "ok.yaml")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBuildIPAllowListTOML(t *testing.T) {
+	// No allow rules => allow all (never lock a site out).
+	def := buildIPAllowListTOML("a.com", nil)
+	if !strings.Contains(def, "0.0.0.0/0") || !strings.Contains(def, "::/0") {
+		t.Errorf("default allowlist should allow all: %s", def)
+	}
+	if !strings.Contains(def, "a-com-ipallow") {
+		t.Errorf("middleware name wrong: %s", def)
+	}
+	// With rules => only those ranges, quoted.
+	out := buildIPAllowListTOML("a.com", []string{"203.0.113.5", "10.0.0.0/8"})
+	if !strings.Contains(out, `"203.0.113.5"`) || !strings.Contains(out, `"10.0.0.0/8"`) {
+		t.Errorf("allowlist missing ranges: %s", out)
+	}
+	if strings.Contains(out, "0.0.0.0/0") {
+		t.Errorf("allowlist should not allow-all when rules exist: %s", out)
 	}
 }

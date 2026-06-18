@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -497,6 +498,9 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
 	e.docker.RemoveNetwork(ctx, siteNetwork)
 
+	// Remove the site's IP allowlist middleware file.
+	os.Remove(filepath.Join(traefikDynamicDir, ipAllowMiddlewareName(domain)+".toml"))
+
 	if purge {
 		siteDir := filepath.Join(e.dataDir, "sites", domain)
 		if err := os.RemoveAll(siteDir); err != nil {
@@ -522,6 +526,11 @@ func (e *Engine) StartSite(ctx context.Context, domain string) error {
 			}
 			return e.db.UpdateSiteStatus(domain, "running")
 		}
+	}
+
+	// Materialize the site's IP allowlist middleware before the router comes up.
+	if err := e.ApplyIPRules(domain); err != nil {
+		log.Printf("apply ip rules for %s: %v", domain, err)
 	}
 
 	ids, err := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)

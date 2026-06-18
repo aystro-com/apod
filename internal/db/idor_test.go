@@ -87,3 +87,36 @@ func mustCreateSite(t *testing.T, d *DB, domain string) int64 {
 	}
 	return s.ID
 }
+
+func TestAddIPRuleReplaceAndScope(t *testing.T) {
+	d := newTestDB(t)
+	if err := d.AddIPRule("a.com", "1.2.3.4", "allow"); err != nil {
+		t.Fatalf("AddIPRule allow: %v", err)
+	}
+	// Re-adding the same IP with a different action replaces (no duplicate).
+	if err := d.AddIPRule("a.com", "1.2.3.4", "block"); err != nil {
+		t.Fatalf("AddIPRule block: %v", err)
+	}
+	rules, _ := d.ListIPRules("a.com")
+	if len(rules) != 1 || rules[0].Action != "block" {
+		t.Fatalf("expected single block rule, got %+v", rules)
+	}
+	// Invalid action rejected.
+	if err := d.AddIPRule("a.com", "5.6.7.8", "bogus"); err == nil {
+		t.Error("invalid action should be rejected")
+	}
+	// Rules are scoped per site.
+	if err := d.AddIPRule("b.com", "9.9.9.9", "allow"); err != nil {
+		t.Fatalf("AddIPRule b.com: %v", err)
+	}
+	aRules, _ := d.ListIPRules("a.com")
+	if len(aRules) != 1 {
+		t.Fatalf("site a should still have 1 rule, got %d", len(aRules))
+	}
+	// UnblockIP is scoped: removing from the wrong site does nothing.
+	d.UnblockIP("a.com", "9.9.9.9")
+	bRules, _ := d.ListIPRules("b.com")
+	if len(bRules) != 1 {
+		t.Fatalf("site b rule wrongly removed via site a")
+	}
+}
