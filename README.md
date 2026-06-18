@@ -396,9 +396,52 @@ Driver parameters (defined in `parameters:`) are also available as variables. Fo
 
 **Service options:**
 - `backend_scheme: "https"` — tells Traefik the backend uses HTTPS (e.g., UniFi controller)
+- `role:` — the process type for this service (see **Process types** below)
+- `replicas:` — default container count for a `worker` role (>= 1)
 
 **Setup step options:**
 - `user: root` — run the setup command as root inside the container (useful for fixing permissions)
+
+### Process types (web / workers / scheduler)
+
+A single app image can run as several process types — generic and
+stack-agnostic. Set a service's `role`:
+
+| Role | Routed? | Scaling | Use for |
+|------|---------|---------|---------|
+| `web` | Yes (Traefik) | singleton | the HTTP app (php-fpm, node server, …) |
+| `worker` | No | **N replicas** (`apod process scale`) | queues, job runners, background processing |
+| `scheduler` | No | singleton | periodic tickers (e.g. a cron/scheduler loop) |
+| *(unset)* | No | singleton | plain backing services (databases, caches) |
+
+An unset role is backward-compatible: a service named `app` is treated as
+`web`, everything else as a plain backing service — so existing drivers are
+unaffected. Each process is its own isolated, restartable, individually
+scalable container running off the same image, e.g. for Laravel:
+
+```yaml
+services:
+  app:                      # web (HTTP-routed)
+    image: "webdevops/php-nginx-dev:8.4"
+    role: web
+    ports: ["80"]
+  queue:                    # worker — scale to N
+    image: "webdevops/php-nginx-dev:8.4"
+    role: worker
+    replicas: 2
+    command: "php /app/artisan queue:work --tries=3"
+  scheduler:                # background singleton
+    image: "webdevops/php-nginx-dev:8.4"
+    role: scheduler
+    command: "php /app/artisan schedule:work"
+  db:
+    image: "mysql:8.0"      # plain backing service
+```
+
+The bundled `laravel` driver ships `web` + `queue` + `scheduler` out of the box.
+Scale workers at runtime with `apod process scale <domain> queue <n>` (no
+redeploy); new replicas are cloned from a running one so they share the same
+env, generated secrets, command, and limits.
 
 ---
 
@@ -540,10 +583,13 @@ Backups are verified after creation (empty backups are rejected). User-owned sit
 apod backup create <domain> [--storage <name>]
 apod backup list <domain>
 apod backup restore <domain> <backup-id>
+apod backup new-site <domain> <backup-id> <new-domain> [--owner <user>]   # Provision a NEW site from a backup
 apod backup delete <domain> <backup-id>
 ```
 
 **Auto backup before deploy:** Every `apod deploy` automatically creates a backup first, so you can always roll back safely.
+
+**New site from a backup:** `apod backup new-site` provisions a brand-new site (files + databases + volumes) from an existing backup under a fresh domain, leaving the source untouched — handy for spinning up staging from production.
 
 **Scheduled backups:**
 
@@ -587,6 +633,17 @@ Jobs execute inside the site's container.
 apod cron add <domain> --schedule "*/5 * * * *" --command "php artisan schedule:run"
 apod cron list <domain>
 apod cron remove <domain> <cron-id>
+```
+
+### Processes (web / workers / scheduler)
+
+Manage a site's process types (see **Drivers → Process types**). Workers scale
+to N containers without a redeploy.
+
+```bash
+apod process list <domain>                    # Services, roles, desired/running replicas
+apod process scale <domain> <service> <n>     # Set a worker's replica count (0 to pause)
+apod process restart <domain> <service>       # Restart all replicas of a process
 ```
 
 ### Monitoring
@@ -917,8 +974,17 @@ Error responses:
 |--------|----------|-------------|------|
 | `POST` | `/api/v1/sites/{domain}/backups` | Create backup | `{"storage": "my-s3"}` |
 | `GET` | `/api/v1/sites/{domain}/backups` | List backups | |
-| `POST` | `/api/v1/sites/{domain}/backups/restore` | Restore backup | `{"backup_id": 1}` |
+| `POST` | `/api/v1/sites/{domain}/backups/restore` | Restore backup over the same site | `{"backup_id": 1}` |
+| `POST` | `/api/v1/sites/{domain}/backups/new-site` | Provision a new site from a backup | `{"backup_id": 1, "new_domain": "staging.example.com", "owner": ""}` |
 | `DELETE` | `/api/v1/sites/{domain}/backups` | Delete backup | `{"backup_id": 1}` |
+
+### Processes (web / workers / scheduler)
+
+| Method | Endpoint | Description | Body |
+|--------|----------|-------------|------|
+| `GET` | `/api/v1/sites/{domain}/processes` | List processes with role + desired/running replicas | |
+| `POST` | `/api/v1/sites/{domain}/processes/{service}/scale` | Set a worker's replica count | `{"replicas": 3}` |
+| `POST` | `/api/v1/sites/{domain}/processes/{service}/restart` | Restart all replicas of a process | |
 
 ### Backup Schedules
 
