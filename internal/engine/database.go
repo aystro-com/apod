@@ -36,13 +36,15 @@ func (e *Engine) DBExport(ctx context.Context, domain string) (string, error) {
 		return "", fmt.Errorf("unsupported database type: %s", dbCfg.Type)
 	}
 
-	output, err := e.docker.ExecInContainer(ctx, containerName, dumpCmd)
+	// Capture stdout only — stderr warnings and exec frame headers would
+	// corrupt the SQL.
+	output, err := e.docker.ExecCaptureStdout(ctx, containerName, dumpCmd)
 	if err != nil {
 		return "", fmt.Errorf("database dump: %w", err)
 	}
 
 	e.LogActivity(domain, "db_export", "", "success")
-	return output, nil
+	return string(output), nil
 }
 
 func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
@@ -75,7 +77,7 @@ func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
 	var importCmd []string
 	switch dbCfg.Type {
 	case "mysql":
-		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
+		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql --binary-mode=1 -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
 	case "postgres":
 		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
 	default:

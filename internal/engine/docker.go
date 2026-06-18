@@ -284,31 +284,60 @@ func (d *Docker) RemoveNetwork(ctx context.Context, name string) error {
 	return d.cli.NetworkRemove(ctx, name)
 }
 
+// ExecInContainer runs cmd and fails if it exits non-zero. Use ExecCombined for
+// interactive cases where a non-zero exit is a normal result, not an error.
 func (d *Docker) ExecInContainer(ctx context.Context, containerID string, cmd []string) (string, error) {
 	return d.ExecInContainerAs(ctx, containerID, cmd, "")
 }
 
+// ExecInContainerAs runs cmd as user and returns combined stdout+stderr. A
+// non-zero exit code is treated as an error (with the output in the message), so
+// failing setup/deploy/maintenance commands surface instead of silently passing.
 func (d *Docker) ExecInContainerAs(ctx context.Context, containerID string, cmd []string, user string) (string, error) {
-	stdout, stderr, err := d.execCapture(ctx, containerID, cmd, user)
+	stdout, stderr, code, err := d.execCapture(ctx, containerID, cmd, user)
 	if err != nil {
 		return "", err
 	}
-	return string(stdout) + string(stderr), nil
+	out := string(stdout) + string(stderr)
+	if code != 0 {
+		return out, fmt.Errorf("command exited %d: %s", code, strings.TrimSpace(out))
+	}
+	return out, nil
+}
+
+// ExecCombined runs cmd and returns combined output plus the exit code, treating
+// a non-zero exit as a normal result (no error). For interactive/console use,
+// where commands legitimately exit non-zero (e.g. grep with no match).
+func (d *Docker) ExecCombined(ctx context.Context, containerID string, cmd []string) (output string, exitCode int, err error) {
+	stdout, stderr, code, err := d.execCapture(ctx, containerID, cmd, "")
+	if err != nil {
+		return "", 0, err
+	}
+	return string(stdout) + string(stderr), code, nil
 }
 
 // ExecCaptureStdout runs cmd and returns ONLY stdout, demultiplexed from the
 // Docker exec stream. Required when capturing binary or structured output such
 // as a database dump: the raw stream interleaves stderr and carries 8-byte
-// frame headers that would corrupt it.
+// frame headers that would corrupt it. Fails on a non-zero exit so a broken dump
+// is never stored.
 func (d *Docker) ExecCaptureStdout(ctx context.Context, containerID string, cmd []string) ([]byte, error) {
-	stdout, _, err := d.execCapture(ctx, containerID, cmd, "")
-	return stdout, err
+	stdout, stderr, code, err := d.execCapture(ctx, containerID, cmd, "")
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return stdout, fmt.Errorf("command exited %d: %s", code, strings.TrimSpace(string(stderr)))
+	}
+	return stdout, nil
 }
 
-// execCapture runs cmd and returns stdout and stderr separately, properly
-// demultiplexing Docker's exec stream (which otherwise prepends an 8-byte
-// frame header to each chunk and interleaves the two streams).
-func (d *Docker) execCapture(ctx context.Context, containerID string, cmd []string, user string) (stdout, stderr []byte, err error) {
+// execCapture runs cmd and returns stdout, stderr and the exit code. It
+// demultiplexes Docker's exec stream (which otherwise prepends an 8-byte frame
+// header to each chunk and interleaves the two streams) and inspects the exec to
+// recover the exit code. The returned err is only for infrastructure failures
+// (create/attach/read), never for a non-zero command exit.
+func (d *Docker) execCapture(ctx context.Context, containerID string, cmd []string, user string) (stdout, stderr []byte, exitCode int, err error) {
 	exec, err := d.cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
 		AttachStdout: true,
@@ -316,20 +345,26 @@ func (d *Docker) execCapture(ctx context.Context, containerID string, cmd []stri
 		User:         user,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("create exec: %w", err)
+		return nil, nil, 0, fmt.Errorf("create exec: %w", err)
 	}
 
 	resp, err := d.cli.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("attach exec: %w", err)
+		return nil, nil, 0, fmt.Errorf("attach exec: %w", err)
 	}
 	defer resp.Close()
 
 	var outBuf, errBuf bytes.Buffer
 	if _, err := stdcopy.StdCopy(&outBuf, &errBuf, resp.Reader); err != nil {
-		return outBuf.Bytes(), errBuf.Bytes(), fmt.Errorf("read exec output: %w", err)
+		return outBuf.Bytes(), errBuf.Bytes(), 0, fmt.Errorf("read exec output: %w", err)
 	}
-	return outBuf.Bytes(), errBuf.Bytes(), nil
+
+	// The stream has drained, so the command has finished; recover its exit code.
+	inspect, ierr := d.cli.ContainerExecInspect(ctx, exec.ID)
+	if ierr == nil {
+		exitCode = inspect.ExitCode
+	}
+	return outBuf.Bytes(), errBuf.Bytes(), exitCode, nil
 }
 
 // dbImageRepos are official database image repositories that need gosu/su to

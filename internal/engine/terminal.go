@@ -135,7 +135,9 @@ func (e *Engine) ExecInSite(ctx context.Context, domain, command string) (string
 		}
 	}
 
-	output, err := e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", command})
+	// Interactive command: a non-zero exit is a normal result, not an error —
+	// return the output regardless of exit code.
+	output, _, err := e.docker.ExecCombined(ctx, containerName, []string{"sh", "-c", command})
 	if err != nil {
 		return "", fmt.Errorf("exec: %w", err)
 	}
