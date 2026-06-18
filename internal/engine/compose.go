@@ -47,20 +47,57 @@ func sanitizeComposeFile(path string) error {
 		return err
 	}
 
+	// Pre-parse to learn which services already declare an explicit hostname —
+	// for those, container_name must be dropped rather than converted, or the
+	// service would end up with two hostname keys (invalid YAML). This bit a
+	// real LinuxServer compose (syncthing sets both).
+	servicesWithHostname := map[string]bool{}
+	var doc struct {
+		Services map[string]struct {
+			Hostname string `yaml:"hostname"`
+		} `yaml:"services"`
+	}
+	if yaml.Unmarshal(data, &doc) == nil {
+		for name, svc := range doc.Services {
+			if strings.TrimSpace(svc.Hostname) != "" {
+				servicesWithHostname[name] = true
+			}
+		}
+	}
+
 	lines := strings.Split(string(data), "\n")
 	var out []string
 	inPorts := false
 	portsIndent := 0
+	serviceIndent := -1
+	currentService := ""
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		indentWidth := len(line) - len(strings.TrimLeft(line, " \t"))
+
+		// Track the current service so container_name handling can consult
+		// whether that service already has a hostname.
+		if trimmed == "services:" {
+			serviceIndent = -1 // set on the next non-empty child
+		} else if serviceIndent == -1 && trimmed != "" && !strings.HasPrefix(trimmed, "#") && len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "services:" {
+			serviceIndent = indentWidth
+		}
+		if serviceIndent >= 0 && indentWidth == serviceIndent && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+			currentService = strings.TrimSuffix(trimmed, ":")
+		}
 
 		if strings.HasPrefix(line, "name:") {
 			continue
 		}
 
 		if strings.HasPrefix(trimmed, "container_name:") {
-			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			// Drop it when the service already has an explicit hostname,
+			// otherwise convert it so the name stays internally addressable.
+			if servicesWithHostname[currentService] {
+				continue
+			}
+			indent := line[:indentWidth]
 			name := strings.TrimSpace(strings.TrimPrefix(trimmed, "container_name:"))
 			name = strings.Trim(name, "\"'")
 			out = append(out, indent+"hostname: "+name)
