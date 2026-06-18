@@ -1293,7 +1293,8 @@ Every site is fully isolated. Tested against CPU miners, RAM bombs, fork bombs, 
 git clone https://github.com/aystro-com/apod.git
 cd apod && go build ./...
 
-# Run tests
+# Run tests (see docs/testing.md for the real-Docker integration tests
+# and the full lifecycle E2E recipe)
 go test ./...
 
 # Project conventions
