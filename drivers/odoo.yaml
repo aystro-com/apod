@@ -11,6 +11,9 @@ parameters:
 services:
   app:
     image: "odoo:${odoo_version}"
+    # The odoo image runs as uid 101; without this the root-owned bind mounts
+    # are unwritable and the container crash-loops (panel shows a 404).
+    data_owner: "101:101"
     volumes:
       - "${data_root}/odoo/data:/var/lib/odoo"
       - "${data_root}/odoo/addons:/mnt/extra-addons"

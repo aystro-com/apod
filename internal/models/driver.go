@@ -20,6 +20,12 @@ type DriverService struct {
 	// Replicas is the default container count for a worker role (>= 1). Ignored
 	// for non-worker roles, which are always singletons.
 	Replicas int `yaml:"replicas,omitempty"`
+	// DataOwner, when set ("uid" or "uid:gid"), makes apod chown this service's
+	// bind-mounted host directories before the container starts. Needed for
+	// images that run as a fixed non-root user and write to their volumes (e.g.
+	// odoo runs as uid 101) — otherwise the root-owned mount is unwritable and
+	// the container crash-loops.
+	DataOwner string `yaml:"data_owner,omitempty"`
 }
 
 type DriverHealthcheck struct {

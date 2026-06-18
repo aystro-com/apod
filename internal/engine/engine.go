@@ -408,6 +408,11 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 				if strings.HasPrefix(parts[0], "/") {
 					if fi, statErr := os.Stat(parts[0]); statErr != nil || fi.IsDir() {
 						os.MkdirAll(parts[0], 0755)
+						// Hand the mount to the user the image runs as, so a
+						// non-root container (e.g. odoo, uid 101) can write to
+						// its own volume instead of crash-looping on a
+						// root-owned dir.
+						chownDataOwner(parts[0], svc.DataOwner)
 					}
 				}
 			}
@@ -561,6 +566,33 @@ func (e *Engine) rollbackPartialCreate(domain, owner string) {
 	e.db.DeleteProcessScaling(domain)
 	e.db.DeleteSiteSecrets(domain)
 	e.db.DeleteSite(domain)
+}
+
+// chownDataOwner recursively chowns a bind-mount host directory to the user a
+// service's image runs as ("uid" or "uid:gid"). A no-op when owner is empty or
+// malformed — best effort, since the worst case is the pre-existing behaviour.
+func chownDataOwner(path, owner string) {
+	if owner == "" {
+		return
+	}
+	uidStr, gidStr, ok := strings.Cut(owner, ":")
+	if !ok {
+		gidStr = uidStr
+	}
+	uid, err := strconv.Atoi(strings.TrimSpace(uidStr))
+	if err != nil {
+		return
+	}
+	gid, err := strconv.Atoi(strings.TrimSpace(gidStr))
+	if err != nil {
+		gid = uid
+	}
+	filepath.Walk(path, func(p string, _ os.FileInfo, walkErr error) error {
+		if walkErr == nil {
+			os.Chown(p, uid, gid)
+		}
+		return nil
+	})
 }
 
 func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) error {
