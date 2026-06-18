@@ -83,11 +83,10 @@ var cronRemoveCmd = &cobra.Command{
 		var id int64
 		fmt.Sscanf(args[1], "%d", &id)
 		body := map[string]int64{"id": id}
-		_, err := client.Delete(fmt.Sprintf("/api/v1/sites/%s/cron", args[0]))
+		_, err := client.Delete2(fmt.Sprintf("/api/v1/sites/%s/cron", args[0]), body)
 		if err != nil {
 			return err
 		}
-		_ = body
 		fmt.Printf("Cron job %d removed\n", id)
 		return nil
 	},
