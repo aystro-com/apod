@@ -569,6 +569,14 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	}
 	defer e.locks.Release(domain)
 
+	// Deleting a site can stop the very container serving this request (the
+	// apod-ui panel deleting its own domain): the client connection drops and
+	// the request context is cancelled mid-teardown, which previously left the
+	// DB record (status "running") behind and blocked re-creation. Detach so
+	// teardown always runs to completion.
+	ctx, cancel := detachCtx(ctx, 5*time.Minute)
+	defer cancel()
+
 	// Stop any uptime monitoring first so its ticker goroutine doesn't outlive
 	// the site (it would otherwise keep pinging a destroyed domain forever).
 	if e.uptimeChecker != nil {
@@ -584,7 +592,11 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 		driver, _ := e.drivers.Load(site.Driver)
 		if driver != nil && driver.Type == "compose" {
 			e.DestroyComposeSite(ctx, domain, site.Owner)
-			e.db.DeleteSite(domain)
+			if err := e.db.DeleteSite(domain); err != nil {
+				return fmt.Errorf("delete site record: %w", err)
+			}
+			e.db.DeleteProcessScaling(domain)
+			e.db.DeleteSiteSecrets(domain)
 			if purge {
 				siteRoot, _ := e.SiteDir(site.Owner, domain)
 				os.RemoveAll(filepath.Dir(siteRoot))
