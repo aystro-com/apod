@@ -36,6 +36,7 @@ func New(e *engine.Engine) *Server {
 
 	r.Use(RecoveryMiddleware)
 	r.Use(LoggingMiddleware)
+	r.Use(LimitBodyMiddleware)                    // cap request bodies to bound memory/disk DoS
 	r.Use(RateLimitMiddleware(60, 1*time.Minute)) // 60 requests per minute per IP
 
 	// Unauthenticated, first-run only. Tight rate limit on both.
@@ -139,8 +140,12 @@ func New(e *engine.Engine) *Server {
 		// Container logs
 		r.Get("/sites/{domain}/container-logs", h.ContainerLogsHandler)
 
-		// Terminal (secure token-based container exec)
+		// Terminal (secure token-based container exec). exec also lives inside
+		// the authenticated group: the terminal token is the exec authorization,
+		// but requiring a session/key on top means a leaked token alone isn't
+		// enough, and the call is covered by the normal auth/ability stack.
 		r.Post("/sites/{domain}/terminal", h.CreateTerminalTokenHandler)
+		r.Post("/terminal/exec", h.TerminalExecHandler)
 
 		// Clone
 		r.Post("/sites/{domain}/clone", h.CloneSiteHandler)
@@ -229,9 +234,6 @@ func New(e *engine.Engine) *Server {
 		})
 	})
 
-	// Terminal exec — token-based, no API key needed (token IS auth)
-	r.Post("/api/v1/terminal/exec", h.TerminalExecHandler)
-
 	r.Post("/webhook/{token}", h.IncomingWebhookHandler)
 
 	return &Server{handler: h, router: r}
@@ -259,23 +261,35 @@ func (s *Server) ListenSocket(socketPath string) error {
 	log.Printf("apod daemon listening on %s", socketPath)
 	// Unix socket connections get admin access (marked by UnixSocketMiddleware)
 	handler := UnixSocketMiddleware(s.router)
-	return http.Serve(listener, handler)
+	return hardenedServer(handler).Serve(listener)
 }
 
 func (s *Server) ListenTCP(addr string) error {
 	log.Printf("apod daemon listening on %s (TCP, plaintext — put a TLS proxy in front or use ListenTCPTLS)", addr)
-	return http.ListenAndServe(addr, s.router)
+	srv := hardenedServer(s.router)
+	srv.Addr = addr
+	return srv.ListenAndServe()
 }
 
 // ListenTCPTLS serves the API over HTTPS using the given certificate and key.
 func (s *Server) ListenTCPTLS(addr, certFile, keyFile string) error {
 	log.Printf("apod daemon listening on %s (TLS, auth required)", addr)
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: s.router,
-		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-	}
+	srv := hardenedServer(s.router)
+	srv.Addr = addr
+	srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	return srv.ListenAndServeTLS(certFile, keyFile)
+}
+
+// hardenedServer builds an http.Server with timeouts that bound slow-client
+// (Slowloris) attacks. WriteTimeout is intentionally left unset so the SSE
+// deploy-events stream (a long-lived response) isn't cut off; ReadHeaderTimeout
+// is the actual Slowloris defense, with ReadTimeout/IdleTimeout bounding slow
+// bodies and idle keep-alives.
+func hardenedServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
 }

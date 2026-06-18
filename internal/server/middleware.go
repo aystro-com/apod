@@ -27,6 +27,32 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+const (
+	// maxJSONBody caps ordinary JSON/control requests. Generous enough for
+	// compose files and DB dumps, small enough to stop a single huge request
+	// from OOMing the daemon.
+	maxJSONBody = 64 << 20 // 64 MiB
+	// maxUploadBody caps binary uploads (site import archives), which are
+	// legitimately large but must still be bounded to stop a disk-fill DoS.
+	maxUploadBody = 5 << 30 // 5 GiB
+)
+
+// LimitBodyMiddleware wraps the request body in an http.MaxBytesReader so a
+// handler can never read an unbounded amount into memory or onto disk. Binary
+// (zip) uploads get a larger cap than JSON control requests.
+func LimitBodyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			limit := int64(maxJSONBody)
+			if strings.HasPrefix(r.Header.Get("Content-Type"), "application/zip") {
+				limit = maxUploadBody
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
