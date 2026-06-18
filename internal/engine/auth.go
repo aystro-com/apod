@@ -27,6 +27,10 @@ var errInvalidCredentials = fmt.Errorf("invalid username or password")
 // matched by the HTTP layer and the UI.
 var ErrTwoFactorRequired = fmt.Errorf("2fa_required: two-factor code required")
 
+// ErrAccountLocked signals that the account is temporarily locked after too
+// many failed login attempts. The HTTP layer maps it to 429.
+var ErrAccountLocked = fmt.Errorf("account_locked: too many failed attempts")
+
 // IsSessionToken reports whether a bearer token is a login session token
 // (as opposed to a long-lived API key).
 func IsSessionToken(token string) bool {
@@ -63,6 +67,12 @@ func (e *Engine) SetUserPassword(name, password string) error {
 // user has 2FA enabled) and creates a session. It returns the raw session
 // token (shown to the client once) and the user.
 func (e *Engine) LoginWithPassword(name, password, code string) (string, *models.User, error) {
+	// Refuse early when the account is locked from repeated failures. Keyed on
+	// the submitted name (existing or not), so the response can't enumerate users.
+	if e.loginThrottle.Locked(name) {
+		return "", nil, ErrAccountLocked
+	}
+
 	hash, err := e.db.GetUserPasswordHash(name)
 	if err != nil || hash == "" {
 		// Burn comparable time for unknown users / users without a password
@@ -71,26 +81,34 @@ func (e *Engine) LoginWithPassword(name, password, code string) (string, *models
 			[]byte("$2a$10$7EqJtq98hPqEX7fNZaFWoOhi5B0xT1uYJ3mZqK5wW1nyG7uRr0FhO"),
 			[]byte(password),
 		)
+		e.loginThrottle.RecordFailure(name)
 		return "", nil, errInvalidCredentials
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		e.loginThrottle.RecordFailure(name)
 		return "", nil, errInvalidCredentials
 	}
 
 	user, err := e.db.GetUserByName(name)
 	if err != nil {
+		e.loginThrottle.RecordFailure(name)
 		return "", nil, errInvalidCredentials
 	}
 
-	// Second factor, when enabled.
+	// Second factor, when enabled. A wrong code counts as a failed attempt so
+	// the second factor can't be brute-forced past a correct password.
 	if secret, enabled, _ := e.db.GetUserTOTP(name); enabled {
 		if code == "" {
 			return "", nil, ErrTwoFactorRequired
 		}
 		if !e.consumeSecondFactor(name, secret, code) {
+			e.loginThrottle.RecordFailure(name)
 			return "", nil, errInvalidCredentials
 		}
 	}
+
+	// Successful auth — clear the failure record.
+	e.loginThrottle.Reset(name)
 
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {

@@ -259,6 +259,28 @@ func (h *Handler) SaveDriverHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "saved", "name": req.Name})
 }
 
+// ValidateDriverHandler parses driver YAML and returns a preview without
+// saving, so the UI can show what will be created (and any warnings) first.
+func (h *Handler) ValidateDriverHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		YAML string `json:"yaml"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.YAML == "" {
+		respondError(w, http.StatusBadRequest, "yaml is required")
+		return
+	}
+	preview, err := h.engine.ValidateDriver(req.YAML)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, preview)
+}
+
 func (h *Handler) DeleteDriverHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if err := h.engine.DeleteDriver(name); err != nil {

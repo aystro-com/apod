@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/aystro/apod/internal/models"
@@ -114,6 +115,88 @@ func (dl *DriverLoader) Save(name, content string) error {
 		return fmt.Errorf("write driver: %w", err)
 	}
 	return nil
+}
+
+// DriverPreview is a safe, human-readable summary of a parsed driver, returned
+// by validation so the UI can show what a YAML document will create before it
+// is saved.
+type DriverPreview struct {
+	Name        string               `json:"name"`
+	Version     string               `json:"version"`
+	Description string               `json:"description"`
+	Type        string               `json:"type"`
+	Parameters  []DriverParamPreview `json:"parameters"`
+	Services    []string             `json:"services"`
+	Compose     bool                 `json:"compose"`
+	Files       int                  `json:"files"`
+	CronJobs    int                  `json:"cron_jobs"`
+	SetupSteps  int                  `json:"setup_steps"`
+	Warnings    []string             `json:"warnings"`
+}
+
+type DriverParamPreview struct {
+	Name    string   `json:"name"`
+	Type    string   `json:"type"`
+	Default string   `json:"default"`
+	Options []string `json:"options,omitempty"`
+}
+
+// Validate parses driver YAML without writing it to disk and returns a preview.
+// It applies the same hard checks as Save (valid YAML, a name, a known type)
+// and collects non-fatal warnings so the user can review before saving.
+func (dl *DriverLoader) Validate(content string) (*DriverPreview, error) {
+	var driver models.Driver
+	if err := yaml.Unmarshal([]byte(content), &driver); err != nil {
+		return nil, fmt.Errorf("invalid driver YAML: %w", err)
+	}
+	if driver.Name == "" {
+		return nil, fmt.Errorf("driver YAML must set a name")
+	}
+	if !driverNamePattern.MatchString(driver.Name) {
+		return nil, fmt.Errorf("invalid driver name %q", driver.Name)
+	}
+	dtype := driver.Type
+	if dtype == "" {
+		dtype = "services"
+	}
+	if dtype != "services" && dtype != "compose" {
+		return nil, fmt.Errorf("driver type must be \"services\" or \"compose\", got %q", driver.Type)
+	}
+
+	preview := &DriverPreview{
+		Name:        driver.Name,
+		Version:     driver.Version,
+		Description: driver.Description,
+		Type:        dtype,
+		Compose:     driver.Compose != nil,
+		Files:       len(driver.Files),
+		CronJobs:    len(driver.Cron),
+		SetupSteps:  len(driver.Setup),
+	}
+	for name, p := range driver.Parameters {
+		preview.Parameters = append(preview.Parameters, DriverParamPreview{
+			Name: name, Type: p.Type, Default: p.Default, Options: p.Options,
+		})
+	}
+	sort.Slice(preview.Parameters, func(i, j int) bool {
+		return preview.Parameters[i].Name < preview.Parameters[j].Name
+	})
+	for name := range driver.Services {
+		preview.Services = append(preview.Services, name)
+	}
+	sort.Strings(preview.Services)
+
+	// Non-fatal warnings.
+	if dtype == "compose" && driver.Compose == nil {
+		preview.Warnings = append(preview.Warnings, "type is \"compose\" but no compose block is defined")
+	}
+	if dtype == "services" && len(driver.Services) == 0 {
+		preview.Warnings = append(preview.Warnings, "no services defined — the driver will not start any containers")
+	}
+	if driver.Version == "" {
+		preview.Warnings = append(preview.Warnings, "no version set")
+	}
+	return preview, nil
 }
 
 // Delete removes a custom driver. Built-in drivers cannot be deleted.

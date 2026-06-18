@@ -186,6 +186,7 @@ func New(e *engine.Engine) *Server {
 
 			// Custom drivers (admin-managed driver definitions)
 			r.Get("/drivers/{name}", h.GetDriverHandler)
+			r.Post("/drivers/validate", h.ValidateDriverHandler)
 			r.Post("/drivers", h.SaveDriverHandler)
 			r.Delete("/drivers/{name}", h.DeleteDriverHandler)
 

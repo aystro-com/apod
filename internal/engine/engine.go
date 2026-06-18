@@ -33,6 +33,7 @@ type Engine struct {
 	scheduler     *Scheduler
 	uptimeChecker *UptimeChecker
 	cronManager   *CronManager
+	loginThrottle *loginThrottle
 }
 
 type Config struct {
@@ -89,6 +90,7 @@ func New(cfg Config) (*Engine, error) {
 		drivers: NewDriverLoader(cfg.DriverDir),
 		locks:   NewLockManager(),
 		dataDir: cfg.DataDir,
+		loginThrottle: newLoginThrottle(),
 	}
 
 	sched := NewScheduler()
@@ -116,8 +118,9 @@ func New(cfg Config) (*Engine, error) {
 // only exercise database-backed features (users, auth, activity log).
 func NewWithDB(database *db.DB) *Engine {
 	return &Engine{
-		db:    database,
-		locks: NewLockManager(),
+		db:            database,
+		locks:         NewLockManager(),
+		loginThrottle: newLoginThrottle(),
 	}
 }
 
@@ -607,6 +610,11 @@ func (e *Engine) GetDriverContent(name string) (string, error) {
 }
 
 // SaveDriver validates and stores a (custom) driver definition.
+// ValidateDriver parses driver YAML and returns a preview without saving it.
+func (e *Engine) ValidateDriver(content string) (*DriverPreview, error) {
+	return e.drivers.Validate(content)
+}
+
 func (e *Engine) SaveDriver(name, content string) error {
 	if err := e.drivers.Save(name, content); err != nil {
 		return err

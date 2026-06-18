@@ -101,3 +101,58 @@ func TestExpandVariables(t *testing.T) {
 		t.Errorf("got %q, want %q", result, expected)
 	}
 }
+
+func TestValidateDriverPreview(t *testing.T) {
+	loader := NewDriverLoader(t.TempDir())
+
+	// Valid services driver.
+	yaml := `name: redis
+version: "1.0"
+description: Redis cache
+parameters:
+  password:
+    type: string
+    default: ""
+services:
+  cache:
+    image: redis:7
+`
+	p, err := loader.Validate(yaml)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if p.Name != "redis" || p.Type != "services" {
+		t.Fatalf("unexpected preview: %+v", p)
+	}
+	if len(p.Services) != 1 || p.Services[0] != "cache" {
+		t.Fatalf("services not summarized: %+v", p.Services)
+	}
+	if len(p.Parameters) != 1 || p.Parameters[0].Name != "password" {
+		t.Fatalf("parameters not summarized: %+v", p.Parameters)
+	}
+
+	// Bad YAML is rejected.
+	if _, err := loader.Validate("name: [unclosed"); err == nil {
+		t.Error("expected error for malformed YAML")
+	}
+	// Missing name is rejected.
+	if _, err := loader.Validate("version: \"1\""); err == nil {
+		t.Error("expected error for missing name")
+	}
+	// Unknown type is rejected.
+	if _, err := loader.Validate("name: x\ntype: bogus\n"); err == nil {
+		t.Error("expected error for invalid type")
+	}
+	// Path-traversal name is rejected.
+	if _, err := loader.Validate("name: ../evil\n"); err == nil {
+		t.Error("expected error for invalid driver name")
+	}
+	// Services driver with no services warns.
+	p2, err := loader.Validate("name: empty\nversion: \"1\"\n")
+	if err != nil {
+		t.Fatalf("Validate empty: %v", err)
+	}
+	if len(p2.Warnings) == 0 {
+		t.Error("expected a warning for a driver with no services")
+	}
+}

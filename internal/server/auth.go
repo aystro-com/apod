@@ -37,6 +37,12 @@ func (h *Handler) AuthLoginHandler(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusUnauthorized, "2fa_required")
 			return
 		}
+		// Locked after repeated failures. The same response is returned for
+		// real and bogus usernames, so it does not enumerate accounts.
+		if errors.Is(err, engine.ErrAccountLocked) {
+			respondError(w, http.StatusTooManyRequests, "too many failed attempts, try again later")
+			return
+		}
 		// Otherwise always the same generic message — no username enumeration.
 		respondError(w, http.StatusUnauthorized, "invalid username or password")
 		return
