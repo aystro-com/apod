@@ -97,6 +97,7 @@ func New(e *engine.Engine) *Server {
 		r.Get("/sites/{domain}/backups", h.ListBackupsHandler)
 		r.Post("/sites/{domain}/backups/download", h.DownloadBackupHandler)
 		r.Post("/sites/{domain}/backups/restore", h.RestoreBackupHandler)
+		r.Post("/sites/{domain}/backups/new-site", h.NewSiteFromBackupHandler)
 		r.Delete("/sites/{domain}/backups", h.DeleteBackupHandler)
 
 		// Backup schedules

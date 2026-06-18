@@ -84,6 +84,25 @@ var backupRestoreCmd = &cobra.Command{
 	},
 }
 
+var backupNewSiteOwner string
+
+var backupNewSiteCmd = &cobra.Command{
+	Use:   "new-site [domain] [backup-id] [new-domain]",
+	Short: "Create a new site from a backup (the source site is left untouched)",
+	Args:  cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client := NewClient(flagRemote, flagKey)
+		var backupID int64
+		fmt.Sscanf(args[1], "%d", &backupID)
+		body := map[string]interface{}{"backup_id": backupID, "new_domain": args[2], "owner": backupNewSiteOwner}
+		if _, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/backups/new-site", args[0]), body); err != nil {
+			return err
+		}
+		fmt.Printf("Created %s from backup %d of %s\n", args[2], backupID, args[0])
+		return nil
+	},
+}
+
 var backupDeleteCmd = &cobra.Command{
 	Use:   "delete [domain] [backup-id]",
 	Short: "Delete a backup",
@@ -191,6 +210,8 @@ func init() {
 	backupCmd.AddCommand(backupCreateCmd)
 	backupCmd.AddCommand(backupListCmd)
 	backupCmd.AddCommand(backupRestoreCmd)
+	backupNewSiteCmd.Flags().StringVar(&backupNewSiteOwner, "owner", "", "Owner for the new site (defaults to the source site's owner)")
+	backupCmd.AddCommand(backupNewSiteCmd)
 	backupCmd.AddCommand(backupDeleteCmd)
 	backupCmd.AddCommand(backupScheduleCmd)
 	rootCmd.AddCommand(backupCmd)

@@ -498,6 +498,30 @@ func (h *Handler) RestoreBackupHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "restored"})
 }
 
+// NewSiteFromBackupHandler provisions a new site from one of this site's
+// backups, leaving the source untouched. Access is checked against the source
+// site (the {domain} in the path).
+func (h *Handler) NewSiteFromBackupHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	var req struct {
+		BackupID  int64  `json:"backup_id"`
+		NewDomain string `json:"new_domain"`
+		Owner     string `json:"owner"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.CreateSiteFromBackup(r.Context(), req.BackupID, req.NewDomain, req.Owner); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "created", "domain": req.NewDomain})
+}
+
 func (h *Handler) DeleteBackupHandler(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
 	if !h.checkSiteAccess(w, r, domain) {

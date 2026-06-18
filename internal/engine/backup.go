@@ -307,6 +307,63 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	return id, nil
 }
 
+// CreateSiteFromBackup provisions a brand-new site from an existing backup,
+// leaving the original untouched. The backup archive already carries the same
+// layout as an export (metadata.json + files/ + data/ + databases/), so this
+// downloads it and reuses the import path with a fresh domain. Owner defaults to
+// the source site's owner when empty.
+func (e *Engine) CreateSiteFromBackup(ctx context.Context, backupID int64, newDomain, owner string) error {
+	if err := ValidateDomain(newDomain); err != nil {
+		return err
+	}
+
+	backup, err := e.db.GetBackup(backupID)
+	if err != nil {
+		return fmt.Errorf("get backup: %w", err)
+	}
+	if newDomain == backup.SiteDomain {
+		return fmt.Errorf("new domain must differ from the source site %q", backup.SiteDomain)
+	}
+	if existing, _ := e.db.GetSite(newDomain); existing != nil {
+		return fmt.Errorf("site %q already exists", newDomain)
+	}
+
+	source, err := e.db.GetSite(backup.SiteDomain)
+	if err != nil || source == nil {
+		return fmt.Errorf("source site %q not found", backup.SiteDomain)
+	}
+	if owner == "" {
+		owner = source.Owner
+	}
+
+	store, err := e.getStorage(ctx, backup.StorageName, source.Owner)
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := store.Download(ctx, backup.Path, &buf); err != nil {
+		return fmt.Errorf("download backup: %w", err)
+	}
+
+	// ImportSite reads from a file path, so stage the archive in a temp file.
+	tmp, err := os.CreateTemp("", "apod-backup-*.zip")
+	if err != nil {
+		return fmt.Errorf("stage backup: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(buf.Bytes()); err != nil {
+		tmp.Close()
+		return fmt.Errorf("stage backup: %w", err)
+	}
+	tmp.Close()
+
+	if err := e.ImportSite(ctx, tmp.Name(), newDomain, owner); err != nil {
+		return fmt.Errorf("create site from backup: %w", err)
+	}
+	e.LogActivity(newDomain, "site_from_backup", fmt.Sprintf("from backup %d of %s", backupID, backup.SiteDomain), "success")
+	return nil
+}
+
 func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int64) error {
 	if err := e.locks.Acquire(domain); err != nil {
 		return err
