@@ -185,7 +185,10 @@ func (uc *UptimeChecker) sendAlert(webhook, domain, status string, statusCode in
 		Timeout:   10 * time.Second,
 		Transport: &http.Transport{DialContext: safeDialContext},
 	}
-	client.Post(webhook, "application/json", bytes.NewReader(data))
+	resp, err := client.Post(webhook, "application/json", bytes.NewReader(data))
+	if err == nil {
+		resp.Body.Close() // return the connection to the pool; we don't read it
+	}
 }
 
 // validatePublicURL ensures a URL is HTTP(S) and doesn't point to private/internal IPs

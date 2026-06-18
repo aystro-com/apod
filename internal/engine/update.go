@@ -10,13 +10,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var Version = "dev"
+
+// updateHTTPClient is used for all update/driver downloads. It bounds the time
+// spent on a dead or hung server (dial + response-header timeouts, plus a hard
+// overall ceiling) so a stalled download can never pin a goroutine forever,
+// while still allowing a large but healthy binary transfer to complete.
+var updateHTTPClient = &http.Client{
+	Timeout: 5 * time.Minute,
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 20 * time.Second,
+	},
+}
 
 const (
 	githubRepo    = "aystro-com/apod"
@@ -54,7 +69,7 @@ func (e *Engine) CheckForUpdate(ctx context.Context) (string, bool, error) {
 func fetchLatestRelease() (*GithubRelease, error) {
 	// Try stable release first
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
-	resp, err := http.Get(url)
+	resp, err := updateHTTPClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("check for updates: %w", err)
 	}
@@ -69,7 +84,7 @@ func fetchLatestRelease() (*GithubRelease, error) {
 
 	// Fall back to all releases (includes pre-releases)
 	url = fmt.Sprintf("https://api.github.com/repos/%s/releases", githubRepo)
-	resp2, err := http.Get(url)
+	resp2, err := updateHTTPClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("check for updates: %w", err)
 	}
@@ -191,7 +206,7 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 
 // httpGetBytes fetches a URL fully into memory, enforcing a 200 status.
 func httpGetBytes(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	resp, err := updateHTTPClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +243,7 @@ func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {
 	var updated []string
 	for _, name := range drivers {
 		url := driverRepoURL + name
-		resp, err := http.Get(url)
+		resp, err := updateHTTPClient.Get(url)
 		if err != nil {
 			continue
 		}
@@ -254,7 +269,7 @@ func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {
 // listRemoteDrivers discovers driver YAML files from the GitHub repo.
 func listRemoteDrivers() ([]string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/contents/drivers", githubRepo)
-	resp, err := http.Get(url)
+	resp, err := updateHTTPClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
