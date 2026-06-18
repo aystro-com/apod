@@ -47,12 +47,12 @@ func TestDbDumpCommand(t *testing.T) {
 		{"unknown", false},
 	}
 	for _, tt := range tests {
-		cmd := dbDumpCommand(tt.dbType, "mydb", "myuser")
+		cmd := dbDumpCmd(tt.dbType, "mydb", "myuser", siteCreds)
 		if tt.notNil && len(cmd) == 0 {
-			t.Errorf("dbDumpCommand(%q) returned empty", tt.dbType)
+			t.Errorf("dbDumpCmd(%q) returned empty", tt.dbType)
 		}
 		if !tt.notNil && cmd != nil {
-			t.Errorf("dbDumpCommand(%q) should return nil", tt.dbType)
+			t.Errorf("dbDumpCmd(%q) should return nil", tt.dbType)
 		}
 	}
 }
@@ -68,12 +68,12 @@ func TestDbRestoreCommand(t *testing.T) {
 		{"unknown", false},
 	}
 	for _, tt := range tests {
-		cmd := dbRestoreCommand(tt.dbType, "mydb", "myuser", "/tmp/dump.sql")
+		cmd := dbRestoreCmd(tt.dbType, "mydb", "myuser", "QkFTRTY0", siteCreds)
 		if tt.notNil && len(cmd) == 0 {
-			t.Errorf("dbRestoreCommand(%q) returned empty", tt.dbType)
+			t.Errorf("dbRestoreCmd(%q) returned empty", tt.dbType)
 		}
 		if !tt.notNil && cmd != nil {
-			t.Errorf("dbRestoreCommand(%q) should return nil", tt.dbType)
+			t.Errorf("dbRestoreCmd(%q) should return nil", tt.dbType)
 		}
 	}
 }

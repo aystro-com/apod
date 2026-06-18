@@ -22,49 +22,6 @@ import (
 // restore to bound memory/disk impact from a malicious or corrupt archive.
 const maxRestoreTotalBytes = 20 << 30 // 20 GiB
 
-func dbDumpCommand(dbType, dbName, dbUser string) []string {
-	switch dbType {
-	case "mysql":
-		// Use MYSQL_PASSWORD env var from container (set by driver)
-		return []string{"sh", "-c", fmt.Sprintf("mysqldump -u%s -p\"$MYSQL_PASSWORD\" %s", dbUser, dbName)}
-	case "postgres":
-		return []string{"pg_dumpall", "-U", dbUser}
-	case "mongo":
-		return []string{"mongodump", "--archive", "--db", dbName}
-	default:
-		return nil
-	}
-}
-
-// composeDumpCommand returns a dump command for compose-managed databases.
-// Uses environment variables for credentials since compose handles auth via .env.
-func composeDumpCommand(dbType string) []string {
-	switch dbType {
-	case "mysql":
-		return []string{"sh", "-c", "mysqldump --all-databases -u root -p\"$MYSQL_ROOT_PASSWORD\""}
-	case "postgres":
-		// Use POSTGRES_USER env var (set by compose .env), fallback to postgres
-		return []string{"sh", "-c", "pg_dumpall -U \"${POSTGRES_USER:-postgres}\""}
-	case "mongo":
-		return []string{"mongodump", "--archive"}
-	default:
-		return nil
-	}
-}
-
-func dbRestoreCommand(dbType, dbName, dbUser, dumpFile string) []string {
-	switch dbType {
-	case "mysql":
-		return []string{"sh", "-c", fmt.Sprintf("mysql -u%s -p\"$MYSQL_PASSWORD\" %s -e 'source %s'", dbUser, dbName, dumpFile)}
-	case "postgres":
-		return []string{"psql", "-U", dbUser, "-d", dbName, "-f", dumpFile}
-	case "mongo":
-		return []string{"mongorestore", "--archive=" + dumpFile, "--db", dbName}
-	default:
-		return nil
-	}
-}
-
 // restoreZipEntry writes one zip entry to destPath, capped at limit bytes. It
 // clears anything non-regular already at destPath (a directory or, commonly, a
 // symlink such as Laravel's public/storage) so the write does not fail — that
@@ -261,16 +218,15 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	dbName := strings.ReplaceAll(domain, ".", "_")
 	dbUser := dbName
 
-	// Dump databases (gzip-compressed)
+	// Dump databases (gzip-compressed). Compose sites use superuser credentials
+	// (managed by compose); native sites use the per-site user.
 	isCompose := driver.Type == "compose"
+	mode := siteCreds
+	if isCompose {
+		mode = superCreds
+	}
 	for _, dbCfg := range driver.Backup.Databases {
-		var dumpCmd []string
-		if isCompose {
-			// Compose sites: use superuser for dump (credentials come from compose .env)
-			dumpCmd = composeDumpCommand(dbCfg.Type)
-		} else {
-			dumpCmd = dbDumpCommand(dbCfg.Type, dbName, dbUser)
-		}
+		dumpCmd := dbDumpCmd(dbCfg.Type, dbName, dbUser, mode)
 		if dumpCmd == nil {
 			continue
 		}
@@ -278,17 +234,10 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		var output []byte
 		var err error
 		// Retry up to 6 times with 10s delay (container may still be starting).
-		// Capture stdout ONLY — a dump must not be polluted by stderr warnings
-		// (e.g. mysqldump's password notice) or exec stream frame headers.
+		// siteCapture returns stdout ONLY — a dump must not be polluted by stderr
+		// warnings (e.g. mysqldump's password notice) or exec stream frame headers.
 		for attempt := 0; attempt < 6; attempt++ {
-			if isCompose {
-				var s string
-				s, err = e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, dumpCmd)
-				output = []byte(s)
-			} else {
-				containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-				output, err = e.docker.ExecCaptureStdout(ctx, containerName, dumpCmd)
-			}
+			output, err = e.siteCapture(ctx, domain, site.Owner, dbCfg.Service, isCompose, dumpCmd)
 			if err == nil {
 				break
 			}

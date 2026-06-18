@@ -507,3 +507,16 @@ func (e *Engine) ExecInComposeSite(ctx context.Context, domain, owner, service s
 	}
 	return string(output), nil
 }
+
+// execInComposeSiteStdout runs a command in a compose service and returns stdout
+// only (no stderr), required for capturing dumps without pollution.
+func (e *Engine) execInComposeSiteStdout(ctx context.Context, domain, owner, service string, cmdArgs []string) ([]byte, error) {
+	project := composeProjectName(domain)
+	args := append([]string{"exec", "-T", service}, cmdArgs...)
+	cmd := composeCmd(ctx, project, e.composeDir(owner, domain), args...)
+	out, err := cmd.Output() // stdout only
+	if err != nil {
+		return nil, fmt.Errorf("compose exec: %w", err)
+	}
+	return out, nil
+}

@@ -52,7 +52,7 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir, passphrase s
 	// Dump databases (gzip-compressed)
 	for _, dbCfg := range driver.Backup.Databases {
 		containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-		dumpCmd := dbDumpCommand(dbCfg.Type, dbName, dbUser)
+		dumpCmd := dbDumpCmd(dbCfg.Type, dbName, dbUser, siteCreds)
 		if dumpCmd == nil {
 			continue
 		}
@@ -192,17 +192,12 @@ func dbPasswordFromZip(zr *zip.Reader) string {
 // does not race container initialization. Best-effort: it never returns an
 // error, callers proceed regardless.
 func (e *Engine) waitForDBReady(ctx context.Context, containerName, dbType, dbUser, dbName string) {
-	var probe string
-	switch dbType {
-	case "mysql":
-		probe = fmt.Sprintf("mysql -u%s -p\"$MYSQL_PASSWORD\" -e 'SELECT 1' %s", dbUser, dbName)
-	case "postgres":
-		probe = fmt.Sprintf("psql -U %s -d %s -c 'SELECT 1'", dbUser, dbName)
-	default:
+	probe := dbProbeCmd(dbType, dbName, dbUser)
+	if probe == nil {
 		return
 	}
 	for i := 0; i < 45; i++ {
-		out, err := e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", probe})
+		out, err := e.docker.ExecInContainer(ctx, containerName, probe)
 		low := strings.ToLower(out)
 		if err == nil && !strings.Contains(low, "error") &&
 			!strings.Contains(low, "denied") && !strings.Contains(low, "refused") &&
@@ -410,35 +405,20 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 					continue
 				}
 
-				b64Dump := base64Encode(dump)
-				var importShell string
+				mode := siteCreds
 				if isCompose {
-					switch dbCfg.Type {
-					case "mysql":
-						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql -u root -p\"$MYSQL_ROOT_PASSWORD\" < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump)
-					case "postgres":
-						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U \"${POSTGRES_USER:-postgres}\" -f /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump)
-					}
-					if importShell != "" {
-						e.ExecInComposeSite(ctx, domain, site.Owner, dbCfg.Service, []string{"sh", "-c", importShell})
-					}
-				} else {
-					switch dbCfg.Type {
-					case "mysql":
-						// --binary-mode tolerates NUL bytes that mysqldump can emit.
-						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && mysql --binary-mode=1 -u%s -p\"$MYSQL_PASSWORD\" %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
-					case "postgres":
-						importShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)
-					}
-					if importShell != "" {
-						containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-						// A freshly-created DB container can take tens of seconds to
-						// accept connections; wait for readiness so the import does
-						// not race and silently no-op.
-						e.waitForDBReady(ctx, containerName, dbCfg.Type, dbUser, dbName)
-						e.docker.ExecInContainer(ctx, containerName, []string{"sh", "-c", importShell})
-					}
+					mode = superCreds
 				}
+				importCmd := dbRestoreCmd(dbCfg.Type, dbName, dbUser, base64Encode(dump), mode)
+				if importCmd == nil {
+					break
+				}
+				if !isCompose {
+					// A freshly-created DB container can take tens of seconds to
+					// accept connections; wait so the import doesn't race init.
+					e.waitForDBReady(ctx, containerNameFor(domain, dbCfg.Service), dbCfg.Type, dbUser, dbName)
+				}
+				e.siteExec(ctx, domain, site.Owner, dbCfg.Service, isCompose, importCmd)
 				break
 			}
 		}

@@ -161,25 +161,19 @@ func (e *Engine) cloneCompose(ctx context.Context, source *models.Site, driver *
 	}
 
 	for _, dbCfg := range driver.Backup.Databases {
-		dumpCmd := composeDumpCommand(dbCfg.Type)
+		dumpCmd := dbDumpCmd(dbCfg.Type, "", "", superCreds)
 		if dumpCmd == nil {
 			continue
 		}
-		dump, err := e.ExecInComposeSite(ctx, source.Domain, source.Owner, dbCfg.Service, dumpCmd)
+		dump, err := e.siteCapture(ctx, source.Domain, source.Owner, dbCfg.Service, true, dumpCmd)
 		if err != nil {
 			continue
 		}
-		b64Dump := base64Encode([]byte(dump))
-		var restoreShell string
-		switch dbCfg.Type {
-		case "mysql":
-			restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && mysql --binary-mode=1 -u root -p\"$MYSQL_ROOT_PASSWORD\" < /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
-		case "postgres":
-			restoreShell = fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_clone.sql && psql -U \"${POSTGRES_USER:-postgres}\" -f /tmp/_apod_clone.sql && rm -f /tmp/_apod_clone.sql", b64Dump)
+		restoreCmd := dbRestoreCmd(dbCfg.Type, "", "", base64Encode(dump), superCreds)
+		if restoreCmd == nil {
+			continue
 		}
-		if restoreShell != "" {
-			e.ExecInComposeSite(ctx, targetDomain, target.Owner, dbCfg.Service, []string{"sh", "-c", restoreShell})
-		}
+		e.siteExec(ctx, targetDomain, target.Owner, dbCfg.Service, true, restoreCmd)
 	}
 
 	e.LogActivity(source.Domain, "clone", fmt.Sprintf("cloned to %s", targetDomain), "success")
