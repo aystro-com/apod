@@ -119,7 +119,7 @@ func (e *Engine) Rollback(ctx context.Context, domain string) error {
 
 	dep, err := e.db.GetLatestDeployment(domain)
 	if err != nil {
-		return fmt.Errorf("no deployment to rollback: %w", err)
+		return NotFound("no deployment to rollback: %v", err)
 	}
 
 	site, _ := e.db.GetSite(domain)
@@ -129,7 +129,7 @@ func (e *Engine) Rollback(ctx context.Context, domain string) error {
 	if dep.CommitHash != "" {
 		cmd := exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "HEAD~1")
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("git rollback: %w", err)
+			return Invalid("could not roll back (no previous deployment to revert to): %v", err)
 		}
 	}
 

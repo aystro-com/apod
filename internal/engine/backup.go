@@ -470,15 +470,15 @@ func (e *Engine) CreateSiteFromBackup(ctx context.Context, backupID int64, newDo
 		return fmt.Errorf("get backup: %w", err)
 	}
 	if newDomain == backup.SiteDomain {
-		return fmt.Errorf("new domain must differ from the source site %q", backup.SiteDomain)
+		return Invalid("new domain must differ from the source site %q", backup.SiteDomain)
 	}
 	if existing, _ := e.db.GetSite(newDomain); existing != nil {
-		return fmt.Errorf("site %q already exists", newDomain)
+		return Conflict("site %q already exists", newDomain)
 	}
 
 	source, err := e.db.GetSite(backup.SiteDomain)
 	if err != nil || source == nil {
-		return fmt.Errorf("source site %q not found", backup.SiteDomain)
+		return NotFound("source site %q not found", backup.SiteDomain)
 	}
 	if owner == "" {
 		owner = source.Owner

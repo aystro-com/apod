@@ -218,7 +218,7 @@ func validatePublicURL(rawURL string) error {
 	// refuse rather than assume the host is external.
 	ips, err := net.LookupHost(host)
 	if err != nil {
-		return fmt.Errorf("cannot resolve host %q: %w", host, err)
+		return Invalid("cannot resolve host %q: %v", host, err)
 	}
 	if len(ips) == 0 {
 		return fmt.Errorf("host %q did not resolve to any address", host)
@@ -238,7 +238,7 @@ func validatePublicURL(rawURL string) error {
 // Engine methods
 func (e *Engine) EnableUptime(ctx context.Context, domain, rawURL string, intervalSec int, alertWebhook string) error {
 	if err := validatePublicURL(rawURL); err != nil {
-		return fmt.Errorf("invalid uptime URL: %w", err)
+		return Invalid("invalid uptime URL: %v", err)
 	}
 	if alertWebhook != "" {
 		if err := validatePublicURL(alertWebhook); err != nil {

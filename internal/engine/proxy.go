@@ -14,7 +14,7 @@ import (
 func validateIPRule(ip string) error {
 	ip = strings.TrimSpace(ip)
 	if ip == "" {
-		return fmt.Errorf("IP address is required")
+		return Invalid("IP address is required")
 	}
 	if net.ParseIP(ip) != nil {
 		return nil
@@ -32,20 +32,20 @@ func validateIPRule(ip string) error {
 func normalizeSSHPublicKey(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", fmt.Errorf("public key is required")
+		return "", Invalid("public key is required")
 	}
 	if strings.ContainsAny(raw, "\n\r") {
-		return "", fmt.Errorf("public key must be a single line")
+		return "", Invalid("public key must be a single line")
 	}
 	pk, comment, options, rest, err := ssh.ParseAuthorizedKey([]byte(raw))
 	if err != nil {
-		return "", fmt.Errorf("invalid SSH public key: %w", err)
+		return "", Invalid("invalid SSH public key: %v", err)
 	}
 	if len(options) != 0 {
-		return "", fmt.Errorf("public key must not contain authorized_keys options (e.g. command=, from=)")
+		return "", Invalid("public key must not contain authorized_keys options (e.g. command=, from=)")
 	}
 	if len(strings.TrimSpace(string(rest))) != 0 {
-		return "", fmt.Errorf("public key must contain exactly one key")
+		return "", Invalid("public key must contain exactly one key")
 	}
 	// MarshalAuthorizedKey yields a canonical "type base64\n" line.
 	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pk)))
@@ -58,7 +58,9 @@ func normalizeSSHPublicKey(raw string) (string, error) {
 func (e *Engine) AddProxyRule(ctx context.Context, domain, ruleType string, config map[string]string) (int64, error) {
 	configJSON, _ := json.Marshal(config)
 	id, err := e.db.CreateProxyRule(domain, ruleType, string(configJSON))
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	e.LogActivity(domain, "proxy_add", ruleType, "success")
 	return id, nil
 }
@@ -75,25 +77,43 @@ func (e *Engine) RemoveProxyRule(ctx context.Context, id int64, domain string) e
 // rule, only listed sources may reach it (enforced via a Traefik ipWhiteList
 // middleware materialized by ApplyIPRules).
 func (e *Engine) AllowIP(ctx context.Context, domain, ip string) error {
-	if err := validateIPRule(ip); err != nil { return err }
-	if err := e.db.AddIPRule(domain, ip, "allow"); err != nil { return err }
-	if err := e.ApplyIPRules(domain); err != nil { return err }
+	if err := validateIPRule(ip); err != nil {
+		return err
+	}
+	if err := e.db.AddIPRule(domain, ip, "allow"); err != nil {
+		return err
+	}
+	if err := e.ApplyIPRules(domain); err != nil {
+		return err
+	}
 	e.LogActivity(domain, "ip_allow", ip, "success")
 	return nil
 }
 
 func (e *Engine) BlockIP(ctx context.Context, domain, ip string) error {
-	if err := validateIPRule(ip); err != nil { return err }
-	if err := e.db.BlockIP(domain, ip); err != nil { return err }
-	if err := e.ApplyIPRules(domain); err != nil { return err }
+	if err := validateIPRule(ip); err != nil {
+		return err
+	}
+	if err := e.db.BlockIP(domain, ip); err != nil {
+		return err
+	}
+	if err := e.ApplyIPRules(domain); err != nil {
+		return err
+	}
 	e.LogActivity(domain, "ip_block", ip, "success")
 	return nil
 }
 
 func (e *Engine) UnblockIP(ctx context.Context, domain, ip string) error {
-	if err := validateIPRule(ip); err != nil { return err }
-	if err := e.db.UnblockIP(domain, ip); err != nil { return err }
-	if err := e.ApplyIPRules(domain); err != nil { return err }
+	if err := validateIPRule(ip); err != nil {
+		return err
+	}
+	if err := e.db.UnblockIP(domain, ip); err != nil {
+		return err
+	}
+	if err := e.ApplyIPRules(domain); err != nil {
+		return err
+	}
 	e.LogActivity(domain, "ip_unblock", ip, "success")
 	return nil
 }
@@ -103,7 +123,9 @@ func (e *Engine) ListIPRules(ctx context.Context, domain string) (interface{}, e
 }
 
 func (e *Engine) AddFTPAccount(ctx context.Context, domain, username, password string) error {
-	if err := e.db.CreateFTPAccount(domain, username, password); err != nil { return err }
+	if err := e.db.CreateFTPAccount(domain, username, password); err != nil {
+		return err
+	}
 	e.LogActivity(domain, "ftp_add", username, "success")
 	return nil
 }
@@ -121,7 +143,9 @@ func (e *Engine) AddSSHKey(ctx context.Context, name, publicKey string) error {
 	if err != nil {
 		return err
 	}
-	if err := e.db.AddSSHKey(name, normalized); err != nil { return err }
+	if err := e.db.AddSSHKey(name, normalized); err != nil {
+		return err
+	}
 	// Also append to authorized_keys
 	appendAuthorizedKey(normalized)
 	e.LogActivity("server", "ssh_key_add", name, "success")

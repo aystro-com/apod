@@ -13,6 +13,8 @@ var rootCmd = &cobra.Command{
 	Use:   "apod",
 	Short: "Open-source Docker-based server orchestrator",
 	Long:  "apod manages Docker containers to host websites and applications with full isolation, automatic SSL, and a plugin-based driver system.",
+	// Don't dump usage on runtime (non-usage) errors — just print the error.
+	SilenceUsage: true,
 }
 
 func init() {

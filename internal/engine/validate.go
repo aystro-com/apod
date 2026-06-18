@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"net"
 	"regexp"
 	"strconv"
@@ -28,10 +27,10 @@ var (
 func ValidateDomain(domain string) error {
 	d := strings.ToLower(domain)
 	if d == "" || len(d) > 253 {
-		return fmt.Errorf("invalid domain: must be 1-253 characters")
+		return Invalid("invalid domain: must be 1-253 characters")
 	}
 	if !domainPattern.MatchString(d) {
-		return fmt.Errorf("invalid domain %q: only letters, digits, hyphens and dots allowed", domain)
+		return Invalid("invalid domain %q: only letters, digits, hyphens and dots allowed", domain)
 	}
 	return nil
 }
@@ -43,7 +42,7 @@ func ValidateOwner(owner string) error {
 		return nil
 	}
 	if !ownerPattern.MatchString(owner) {
-		return fmt.Errorf("invalid owner %q: only lowercase letters, digits, '_' and '-' allowed", owner)
+		return Invalid("invalid owner %q: only lowercase letters, digits, '_' and '-' allowed", owner)
 	}
 	return nil
 }
@@ -55,10 +54,10 @@ func ValidateBranch(branch string) error {
 		return nil
 	}
 	if strings.HasPrefix(branch, "-") || strings.Contains(branch, "..") {
-		return fmt.Errorf("invalid branch %q", branch)
+		return Invalid("invalid branch %q", branch)
 	}
 	if !branchPattern.MatchString(branch) {
-		return fmt.Errorf("invalid branch %q: only letters, digits and ._/- allowed", branch)
+		return Invalid("invalid branch %q: only letters, digits and ._/- allowed", branch)
 	}
 	return nil
 }
@@ -73,25 +72,25 @@ func ValidateRepo(repo string) error {
 		return nil
 	}
 	if strings.HasPrefix(repo, "-") {
-		return fmt.Errorf("invalid repository URL %q", repo)
+		return Invalid("invalid repository URL %q", repo)
 	}
 	// Reject git "smart transport" helpers such as ext::, fd::, etc. which can
 	// execute arbitrary commands during clone.
 	if strings.Contains(repo, "::") {
-		return fmt.Errorf("invalid repository URL: transport helpers are not allowed")
+		return Invalid("invalid repository URL: transport helpers are not allowed")
 	}
 	if gitHTTPSPattern.MatchString(repo) || gitSSHPattern.MatchString(repo) ||
 		strings.HasPrefix(repo, "ssh://") || strings.HasPrefix(repo, "git://") {
 		return nil
 	}
-	return fmt.Errorf("invalid repository URL: only http(s) and ssh remotes are allowed")
+	return Invalid("invalid repository URL: only http(s) and ssh remotes are allowed")
 }
 
 // ValidatePortNumber accepts a single TCP/UDP port (1-65535).
 func ValidatePortNumber(port string) error {
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1 || n > 65535 {
-		return fmt.Errorf("invalid port %q: must be 1-65535", port)
+		return Invalid("invalid port %q: must be 1-65535", port)
 	}
 	return nil
 }
@@ -102,7 +101,7 @@ var ufwPortPattern = regexp.MustCompile(`^[0-9]{1,5}(:[0-9]{1,5})?(/(tcp|udp))?$
 // with a /tcp or /udp suffix (e.g. "80", "6000:6010/tcp").
 func ValidateUFWPort(port string) error {
 	if !ufwPortPattern.MatchString(port) {
-		return fmt.Errorf("invalid port %q", port)
+		return Invalid("invalid port %q", port)
 	}
 	for _, p := range strings.FieldsFunc(strings.SplitN(port, "/", 2)[0], func(r rune) bool { return r == ':' }) {
 		if err := ValidatePortNumber(p); err != nil {
@@ -118,7 +117,7 @@ func ValidateProto(proto string) error {
 	case "", "tcp", "udp":
 		return nil
 	}
-	return fmt.Errorf("invalid protocol %q: must be tcp or udp", proto)
+	return Invalid("invalid protocol %q: must be tcp or udp", proto)
 }
 
 // ValidateIPOrCIDR accepts a single IP address or a CIDR range, or the literal
@@ -126,7 +125,7 @@ func ValidateProto(proto string) error {
 func ValidateIPOrCIDR(source string) error {
 	source = strings.TrimSpace(source)
 	if source == "" {
-		return fmt.Errorf("source is required")
+		return Invalid("source is required")
 	}
 	if strings.EqualFold(source, "any") {
 		return nil
@@ -137,7 +136,7 @@ func ValidateIPOrCIDR(source string) error {
 	if _, _, err := net.ParseCIDR(source); err == nil {
 		return nil
 	}
-	return fmt.Errorf("invalid source %q: must be an IP, CIDR, or 'any'", source)
+	return Invalid("invalid source %q: must be an IP, CIDR, or 'any'", source)
 }
 
 // gitHardeningArgs returns global git config flags that disable dangerous

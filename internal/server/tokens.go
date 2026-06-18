@@ -41,7 +41,7 @@ func (h *Handler) ListAPITokensHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	tokens, err := h.engine.ListAPITokens(name)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"tokens": tokens})

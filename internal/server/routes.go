@@ -44,6 +44,24 @@ func respondError(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(apiResponse{OK: false, Error: msg})
 }
 
+// respondEngineError maps a typed engine error to the appropriate HTTP status
+// (invalid input → 400, missing resource → 404, conflict → 409, forbidden →
+// 403) and falls back to 500 for genuine server-side failures.
+func respondEngineError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	switch engine.ErrorKindOf(err) {
+	case engine.KindInvalid:
+		status = http.StatusBadRequest
+	case engine.KindNotFound:
+		status = http.StatusNotFound
+	case engine.KindConflict:
+		status = http.StatusConflict
+	case engine.KindForbidden:
+		status = http.StatusForbidden
+	}
+	respondError(w, status, err.Error())
+}
+
 func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Domain  string            `json:"domain"`
@@ -89,7 +107,7 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		Owner:   owner,
 	})
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 
@@ -129,7 +147,7 @@ func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {
 		sites, err = h.engine.ListSites(r.Context())
 	}
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, sites)
@@ -172,7 +190,7 @@ func (h *Handler) StartSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.StartSite(r.Context(), domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "started"})
@@ -184,7 +202,7 @@ func (h *Handler) StopSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.StopSite(r.Context(), domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
@@ -196,7 +214,7 @@ func (h *Handler) RestartSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.RestartSite(r.Context(), domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
@@ -210,7 +228,7 @@ func (h *Handler) DestroySite(w http.ResponseWriter, r *http.Request) {
 	purge := r.URL.Query().Get("purge") == "true"
 
 	if err := h.engine.DestroySite(r.Context(), domain, purge); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "destroyed"})
@@ -219,7 +237,7 @@ func (h *Handler) DestroySite(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListDrivers(w http.ResponseWriter, r *http.Request) {
 	drivers, err := h.engine.ListDrivers()
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, drivers)
@@ -307,7 +325,7 @@ func (h *Handler) AddDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.AddDomain(r.Context(), siteDomain, req.Domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "added", "domain": req.Domain})
@@ -320,7 +338,7 @@ func (h *Handler) RemoveDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	removeDomain := chi.URLParam(r, "aliasDomain")
 	if err := h.engine.RemoveDomain(r.Context(), siteDomain, removeDomain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed", "domain": removeDomain})
@@ -333,7 +351,7 @@ func (h *Handler) ListDomains(w http.ResponseWriter, r *http.Request) {
 	}
 	domains, err := h.engine.ListDomains(r.Context(), siteDomain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, domains)
@@ -370,7 +388,7 @@ func (h *Handler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.SetConfig(r.Context(), domain, req.Key, req.Value); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "updated"})
@@ -394,7 +412,7 @@ func (h *Handler) SetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.SetEnv(r.Context(), domain, req.Key, req.Value); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "set", "key": req.Key})
@@ -407,7 +425,7 @@ func (h *Handler) UnsetEnv(w http.ResponseWriter, r *http.Request) {
 	}
 	key := chi.URLParam(r, "key")
 	if err := h.engine.UnsetEnv(r.Context(), domain, key); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed", "key": key})
@@ -420,7 +438,7 @@ func (h *Handler) ListEnv(w http.ResponseWriter, r *http.Request) {
 	}
 	envs, err := h.engine.ListEnv(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, envs)
@@ -438,7 +456,7 @@ func (h *Handler) CreateBackupHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := h.engine.CreateBackup(r.Context(), domain, req.Storage)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]int64{"backup_id": id})
@@ -451,7 +469,7 @@ func (h *Handler) ListBackupsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	backups, err := h.engine.ListBackups(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, backups)
@@ -492,7 +510,7 @@ func (h *Handler) RestoreBackupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.RestoreBackup(r.Context(), domain, req.BackupID); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "restored"})
@@ -535,7 +553,7 @@ func (h *Handler) DeleteBackupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.DeleteBackup(r.Context(), domain, req.BackupID); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -560,7 +578,7 @@ func (h *Handler) AddBackupScheduleHandler(w http.ResponseWriter, r *http.Reques
 	}
 	id, err := h.engine.AddBackupSchedule(r.Context(), domain, req.Every, req.Storage, req.Keep)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]int64{"schedule_id": id})
@@ -573,7 +591,7 @@ func (h *Handler) ListBackupSchedulesHandler(w http.ResponseWriter, r *http.Requ
 	}
 	schedules, err := h.engine.ListBackupSchedules(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, schedules)
@@ -592,7 +610,7 @@ func (h *Handler) RemoveBackupScheduleHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := h.engine.RemoveBackupSchedule(r.Context(), req.ScheduleID, domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -614,7 +632,7 @@ func (h *Handler) AddStorageConfigHandler(w http.ResponseWriter, r *http.Request
 	}
 	configJSON, _ := json.Marshal(req.Config)
 	if err := h.engine.AddStorageConfig(req.Name, req.Driver, string(configJSON)); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "created", "name": req.Name})
@@ -625,7 +643,7 @@ func (h *Handler) ListStorageConfigsHandler(w http.ResponseWriter, r *http.Reque
 	// passwords) before returning configs.
 	configs, err := h.engine.ListStorageConfigs()
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, configs)
@@ -634,7 +652,7 @@ func (h *Handler) ListStorageConfigsHandler(w http.ResponseWriter, r *http.Reque
 func (h *Handler) RemoveStorageConfigHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if err := h.engine.RemoveStorageConfig(name); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -650,7 +668,7 @@ func (h *Handler) DeployHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.Deploy(r.Context(), domain, req.Branch); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deployed"})
@@ -662,7 +680,7 @@ func (h *Handler) RollbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.Rollback(r.Context(), domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "rolled_back"})
@@ -675,7 +693,7 @@ func (h *Handler) ListDeploymentsHandler(w http.ResponseWriter, r *http.Request)
 	}
 	deps, err := h.engine.ListDeployments(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, deps)
@@ -688,7 +706,7 @@ func (h *Handler) CreateWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := h.engine.CreateWebhook(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"token": token, "url": "/webhook/" + token})
@@ -701,7 +719,7 @@ func (h *Handler) ListWebhooksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	whs, err := h.engine.ListWebhooks(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, whs)
@@ -713,7 +731,7 @@ func (h *Handler) DeleteWebhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.DeleteWebhook(r.Context(), domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -736,7 +754,7 @@ func (h *Handler) CloneSiteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.Clone(r.Context(), domain, req.Target); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "cloned", "target": req.Target})
@@ -753,7 +771,7 @@ func (h *Handler) ExportSiteHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 	path, err := h.engine.ExportSite(r.Context(), domain, req.OutputDir)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	info, _ := os.Stat(path)
@@ -796,7 +814,7 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 		owner := resolveOwner(r.URL.Query().Get("owner"))
 
 		if err := h.engine.ImportSite(r.Context(), tmpFile.Name(), domain, owner); err != nil {
-			respondError(w, http.StatusInternalServerError, err.Error())
+			respondEngineError(w, err)
 			return
 		}
 		respondJSON(w, http.StatusCreated, map[string]string{"status": "imported"})
@@ -824,7 +842,7 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.engine.ImportSite(r.Context(), req.Path, req.Domain, req.Owner); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "imported"})
@@ -837,7 +855,7 @@ func (h *Handler) DBExportHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	dump, err := h.engine.DBExport(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"dump": dump})
@@ -856,7 +874,7 @@ func (h *Handler) DBImportHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.DBImport(r.Context(), domain, req.Dump); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "imported"})
@@ -865,7 +883,7 @@ func (h *Handler) DBImportHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ServerStatsHandler(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.engine.GetServerStats(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, stats)
@@ -874,7 +892,7 @@ func (h *Handler) ServerStatsHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DiskUsageHandler(w http.ResponseWriter, r *http.Request) {
 	usage, err := h.engine.GetDiskUsage(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, usage)
@@ -900,7 +918,7 @@ func (h *Handler) AddCronJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.engine.AddCronJob(r.Context(), domain, req.Schedule, req.Command, req.Service)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]int64{"cron_id": id})
@@ -913,7 +931,7 @@ func (h *Handler) ListCronJobsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	jobs, err := h.engine.ListCronJobs(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, jobs)
@@ -932,7 +950,7 @@ func (h *Handler) RemoveCronJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.RemoveCronJob(r.Context(), req.ID, domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -960,7 +978,7 @@ func (h *Handler) MonitorSiteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := h.engine.GetSiteStats(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, stats)
@@ -969,7 +987,7 @@ func (h *Handler) MonitorSiteHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) MonitorAllHandler(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.engine.GetAllStats(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, stats)
@@ -997,7 +1015,7 @@ func (h *Handler) EnableUptimeHandler(w http.ResponseWriter, r *http.Request) {
 		req.Interval = 60
 	}
 	if err := h.engine.EnableUptime(r.Context(), domain, req.URL, req.Interval, req.AlertWebhook); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "enabled"})
@@ -1009,7 +1027,7 @@ func (h *Handler) DisableUptimeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.DisableUptime(r.Context(), domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "disabled"})
@@ -1035,7 +1053,7 @@ func (h *Handler) UptimeLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	logs, err := h.engine.GetUptimeLogs(r.Context(), domain, 50)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, logs)
@@ -1049,7 +1067,7 @@ func (h *Handler) ContainerLogsHandler(w http.ResponseWriter, r *http.Request) {
 	lines := 100
 	output, err := h.engine.GetContainerLogs(r.Context(), domain, lines)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"logs": output})
@@ -1062,7 +1080,7 @@ func (h *Handler) SiteLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	logs, err := h.engine.GetLogs(r.Context(), domain, 50)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, logs)
@@ -1071,7 +1089,7 @@ func (h *Handler) SiteLogsHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AllLogsHandler(w http.ResponseWriter, r *http.Request) {
 	logs, err := h.engine.GetAllLogs(r.Context(), 100)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, logs)
@@ -1093,7 +1111,7 @@ func (h *Handler) AddProxyRuleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.engine.AddProxyRule(r.Context(), domain, req.Type, req.Config)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]int64{"rule_id": id})
@@ -1106,7 +1124,7 @@ func (h *Handler) ListProxyRulesHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	rules, err := h.engine.ListProxyRules(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, rules)
@@ -1122,7 +1140,7 @@ func (h *Handler) RemoveProxyRuleHandler(w http.ResponseWriter, r *http.Request)
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.RemoveProxyRule(r.Context(), req.ID, domain); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -1136,7 +1154,7 @@ func (h *Handler) ListProcessesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	procs, err := h.engine.ListProcesses(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, procs)
@@ -1202,7 +1220,7 @@ func (h *Handler) BlockIPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.BlockIP(r.Context(), domain, req.IP); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "blocked", "ip": req.IP})
@@ -1218,7 +1236,7 @@ func (h *Handler) UnblockIPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.UnblockIP(r.Context(), domain, req.IP); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "unblocked"})
@@ -1231,7 +1249,7 @@ func (h *Handler) ListIPRulesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rules, err := h.engine.ListIPRules(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, rules)
@@ -1249,7 +1267,7 @@ func (h *Handler) AddFTPAccountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.AddFTPAccount(r.Context(), domain, req.Username, req.Password); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "created", "username": req.Username})
@@ -1262,7 +1280,7 @@ func (h *Handler) ListFTPAccountsHandler(w http.ResponseWriter, r *http.Request)
 	}
 	accounts, err := h.engine.ListFTPAccounts(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, accounts)
@@ -1275,7 +1293,7 @@ func (h *Handler) RemoveFTPAccountHandler(w http.ResponseWriter, r *http.Request
 	}
 	username := chi.URLParam(r, "username")
 	if err := h.engine.RemoveFTPAccount(r.Context(), domain, username); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -1285,7 +1303,7 @@ func (h *Handler) RemoveFTPAccountHandler(w http.ResponseWriter, r *http.Request
 func (h *Handler) FirewallStatusHandler(w http.ResponseWriter, r *http.Request) {
 	status, err := h.engine.FirewallStatus(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, status)
@@ -1293,7 +1311,7 @@ func (h *Handler) FirewallStatusHandler(w http.ResponseWriter, r *http.Request) 
 
 func (h *Handler) FirewallEnableHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.engine.FirewallEnable(r.Context()); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "enabled"})
@@ -1309,7 +1327,7 @@ func (h *Handler) FirewallAllowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.FirewallAllow(r.Context(), req.Port); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "allowed", "port": req.Port})
@@ -1325,7 +1343,7 @@ func (h *Handler) FirewallDenyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.FirewallDeny(r.Context(), req.Port); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "denied", "port": req.Port})
@@ -1334,7 +1352,7 @@ func (h *Handler) FirewallDenyHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) FirewallRulesHandler(w http.ResponseWriter, r *http.Request) {
 	rules, err := h.engine.FirewallRules(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, rules)
@@ -1374,7 +1392,7 @@ func (h *Handler) AddSSHKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.AddSSHKey(r.Context(), req.Name, req.PublicKey); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusCreated, map[string]string{"status": "added", "name": req.Name})
@@ -1383,7 +1401,7 @@ func (h *Handler) AddSSHKeyHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListSSHKeysHandler(w http.ResponseWriter, r *http.Request) {
 	keys, err := h.engine.ListSSHKeys(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, keys)
@@ -1392,7 +1410,7 @@ func (h *Handler) ListSSHKeysHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RemoveSSHKeyHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if err := h.engine.RemoveSSHKey(r.Context(), name); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -1410,7 +1428,7 @@ func (h *Handler) VersionHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CheckUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	latest, hasUpdate, err := h.engine.CheckForUpdate(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{
@@ -1422,7 +1440,7 @@ func (h *Handler) CheckUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.engine.SelfUpdate(r.Context()); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "updated", "message": "restart apod server to use new version"})
@@ -1431,7 +1449,7 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateDriversHandler(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.engine.UpdateDrivers(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"updated": updated})
@@ -1458,7 +1476,7 @@ func (h *Handler) CreateUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, rawKey, err := h.engine.CreateUser(r.Context(), req.Name, req.Role)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 
@@ -1471,7 +1489,7 @@ func (h *Handler) CreateUserHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 	users, err := h.engine.ListUsers(r.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, users)
@@ -1480,7 +1498,7 @@ func (h *Handler) ListUsersHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if err := h.engine.DeleteUser(r.Context(), name); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1496,7 +1514,7 @@ func (h *Handler) TransferSiteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.TransferSite(r.Context(), domain, req.Owner); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "transferred", "owner": req.Owner})
@@ -1506,7 +1524,7 @@ func (h *Handler) ResetAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	rawKey, err := h.engine.ResetAPIKey(r.Context(), name)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"api_key": rawKey})
@@ -1521,7 +1539,7 @@ func (h *Handler) CreateTerminalTokenHandler(w http.ResponseWriter, r *http.Requ
 
 	token, err := h.engine.CreateTerminalToken(r.Context(), domain)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, token)
@@ -1555,7 +1573,7 @@ func (h *Handler) TerminalExecHandler(w http.ResponseWriter, r *http.Request) {
 	// Execute in the app container
 	output, err := h.engine.ExecInSite(r.Context(), domain, req.Command)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 

@@ -152,7 +152,7 @@ func (e *Engine) TransferSite(ctx context.Context, domain, newOwner string) erro
 	// Validate new owner exists (empty string = unassign / admin-owned)
 	if newOwner != "" {
 		if _, err := e.db.GetUserByName(newOwner); err != nil {
-			return fmt.Errorf("user %q not found", newOwner)
+			return NotFound("user %q not found", newOwner)
 		}
 	}
 

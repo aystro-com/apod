@@ -6,8 +6,8 @@ func TestEffectiveRole(t *testing.T) {
 	cases := []struct {
 		svc, role, want string
 	}{
-		{"app", "", roleWeb},          // legacy: app with no role => web
-		{"db", "", ""},                // legacy backing service stays plain
+		{"app", "", roleWeb}, // legacy: app with no role => web
+		{"db", "", ""},       // legacy backing service stays plain
 		{"queue", "worker", roleWorker},
 		{"cron", "scheduler", roleScheduler},
 		{"app", "worker", roleWorker}, // explicit role wins over the name
@@ -39,13 +39,13 @@ func TestResolveReplicas(t *testing.T) {
 		override *int
 		want     int
 	}{
-		{roleWeb, 5, &n, 1},        // web is a singleton regardless
-		{roleScheduler, 5, &n, 1},  // scheduler is a singleton
-		{"", 5, &n, 1},             // plain backing service is a singleton
-		{roleWorker, 2, nil, 2},    // worker uses the driver default
-		{roleWorker, 0, nil, 1},    // unset driver default => at least 1
-		{roleWorker, 2, &n, 3},     // override beats the driver default
-		{roleWorker, 2, &zero, 0},  // scale-to-zero (pause) is allowed
+		{roleWeb, 5, &n, 1},       // web is a singleton regardless
+		{roleScheduler, 5, &n, 1}, // scheduler is a singleton
+		{"", 5, &n, 1},            // plain backing service is a singleton
+		{roleWorker, 2, nil, 2},   // worker uses the driver default
+		{roleWorker, 0, nil, 1},   // unset driver default => at least 1
+		{roleWorker, 2, &n, 3},    // override beats the driver default
+		{roleWorker, 2, &zero, 0}, // scale-to-zero (pause) is allowed
 	}
 	for i, c := range cases {
 		if got := resolveReplicas(c.role, c.driver, c.override); got != c.want {

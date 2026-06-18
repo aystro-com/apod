@@ -43,10 +43,10 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		return fmt.Errorf("get source site: %w", err)
 	}
 	if source == nil {
-		return fmt.Errorf("source site %q not found", sourceDomain)
+		return NotFound("source site %q not found", sourceDomain)
 	}
 	if existing, _ := e.db.GetSite(targetDomain); existing != nil {
-		return fmt.Errorf("target site %q already exists", targetDomain)
+		return Conflict("target site %q already exists", targetDomain)
 	}
 
 	driver, err := e.drivers.Load(source.Driver)

@@ -43,9 +43,9 @@ func (e *Engine) ApplyDiskQuota(ctx context.Context, owner string) error {
 	// We set soft = hard (no grace period), inodes = 0 (unlimited)
 	cmd := exec.CommandContext(ctx, "setquota",
 		"-u", strconv.Itoa(user.UID),
-		strconv.FormatInt(totalKB, 10),  // soft block limit
-		strconv.FormatInt(totalKB, 10),  // hard block limit
-		"0", "0", // no inode limits
+		strconv.FormatInt(totalKB, 10), // soft block limit
+		strconv.FormatInt(totalKB, 10), // hard block limit
+		"0", "0",                       // no inode limits
 		"/", // filesystem
 	)
 	output, err := cmd.CombinedOutput()

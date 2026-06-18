@@ -133,7 +133,7 @@ func (h *Handler) TwoFactorSetupHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	secret, uri, err := h.engine.Setup2FA(name)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"secret": secret, "uri": uri})

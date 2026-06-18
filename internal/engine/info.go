@@ -9,10 +9,10 @@ import (
 
 // SiteCredentials holds user-facing credentials for a site
 type SiteCredentials struct {
-	Domain   string            `json:"domain"`
-	Driver   string            `json:"driver"`
-	URL      string            `json:"url"`
-	Secrets  map[string]string `json:"secrets,omitempty"`
+	Domain  string            `json:"domain"`
+	Driver  string            `json:"driver"`
+	URL     string            `json:"url"`
+	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
 // GetSiteCredentials returns the user-facing credentials for a site.

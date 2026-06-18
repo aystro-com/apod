@@ -209,7 +209,7 @@ func (dl *DriverLoader) Delete(name string) error {
 		return err
 	}
 	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("driver %q not found", name)
+		return NotFound("driver %q not found", name)
 	}
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("delete driver: %w", err)

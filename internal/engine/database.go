@@ -64,7 +64,7 @@ func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
 	}
 
 	if len(driver.Backup.Databases) == 0 {
-		return fmt.Errorf("site %q has no database configured", domain)
+		return Invalid("site %q has no database configured", domain)
 	}
 
 	dbCfg := driver.Backup.Databases[0]
@@ -81,7 +81,7 @@ func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
 	case "postgres":
 		importCmd = []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > /tmp/_apod_import.sql && psql -U %s %s < /tmp/_apod_import.sql && rm -f /tmp/_apod_import.sql", b64Dump, dbUser, dbName)}
 	default:
-		return fmt.Errorf("unsupported database type for import: %s", dbCfg.Type)
+		return Invalid("unsupported database type for import: %s", dbCfg.Type)
 	}
 
 	_, err = e.docker.ExecInContainer(ctx, containerName, importCmd)

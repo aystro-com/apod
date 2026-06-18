@@ -164,11 +164,11 @@ func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, repli
 	defer e.locks.Release(domain)
 
 	if replicas < 0 || replicas > maxReplicas {
-		return fmt.Errorf("replicas must be between 0 and %d", maxReplicas)
+		return Invalid("replicas must be between 0 and %d", maxReplicas)
 	}
 	site, err := e.db.GetSite(domain)
 	if err != nil || site == nil {
-		return fmt.Errorf("site %q not found", domain)
+		return NotFound("site %q not found", domain)
 	}
 	driver, err := e.drivers.Load(site.Driver)
 	if err != nil {
@@ -176,10 +176,10 @@ func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, repli
 	}
 	svc, ok := driver.Services[svcName]
 	if !ok {
-		return fmt.Errorf("service %q not found in driver %q", svcName, site.Driver)
+		return NotFound("service %q not found in driver %q", svcName, site.Driver)
 	}
 	if !scalableRole(effectiveRole(svcName, svc.Role)) {
-		return fmt.Errorf("service %q is not a scalable worker", svcName)
+		return Invalid("service %q is not a scalable worker", svcName)
 	}
 
 	if err := e.db.SetProcessReplicas(domain, svcName, replicas); err != nil {

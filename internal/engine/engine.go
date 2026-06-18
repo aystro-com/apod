@@ -211,7 +211,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 					return fmt.Errorf("create site record: %w", err)
 				}
 			} else {
-				return fmt.Errorf("site %q already exists (status: %s)", opts.Domain, existing.Status)
+				return Conflict("site %q already exists (status: %s)", opts.Domain, existing.Status)
 			}
 		} else {
 			return fmt.Errorf("create site record: %w", err)
