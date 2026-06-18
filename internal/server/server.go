@@ -24,6 +24,12 @@ type Server struct {
 	router  *chi.Mux
 }
 
+// Handler exposes the server's HTTP handler so it can be mounted directly
+// (e.g. behind httptest in end-to-end tests) without opening a socket.
+func (s *Server) Handler() http.Handler {
+	return s.router
+}
+
 func New(e *engine.Engine) *Server {
 	h := NewHandler(e)
 	r := chi.NewRouter()
