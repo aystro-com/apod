@@ -188,21 +188,35 @@ func (d *DB) migrate() error {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	// Get current version
+	// Get current version. Fail closed on a read error — assuming version 0
+	// would re-run every (non-idempotent) migration and brick startup.
 	var currentVersion int
-	d.conn.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&currentVersion)
+	if err := d.conn.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&currentVersion); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
 
-	// Run pending migrations
+	// Run pending migrations. Each migration's DDL and its version record are
+	// committed atomically so a crash mid-migration can't leave the schema in
+	// a state that re-runs a non-idempotent ALTER on next boot.
 	applied := 0
 	for _, m := range migrations {
 		if m.Version <= currentVersion {
 			continue
 		}
-		if _, err := d.conn.Exec(m.SQL); err != nil {
+		tx, err := d.conn.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration %d: %w", m.Version, err)
+		}
+		if _, err := tx.Exec(m.SQL); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("migration %d: %w", m.Version, err)
 		}
-		if _, err := d.conn.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, m.Version); err != nil {
+		if _, err := tx.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, m.Version); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("record migration %d: %w", m.Version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %d: %w", m.Version, err)
 		}
 		applied++
 	}

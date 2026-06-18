@@ -190,7 +190,9 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 	if err := e.db.CreateSite(site); err != nil {
 		// If domain exists from a failed previous create, clean it up and retry
 		if existing, _ := e.db.GetSite(opts.Domain); existing != nil {
-			if existing.Status == "creating" || existing.Status == "error" {
+			// Only reclaim a stuck record if it belongs to the same owner —
+			// otherwise a user could hijack another tenant's failed domain.
+			if (existing.Status == "creating" || existing.Status == "error") && existing.Owner == opts.Owner {
 				e.db.DeleteSite(opts.Domain)
 				if err := e.db.CreateSite(site); err != nil {
 					return fmt.Errorf("create site record: %w", err)
@@ -403,15 +405,19 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		envContent := fmt.Sprintf("APP_ENV=production\nAPP_URL=https://%s\n", opts.Domain)
 		envContent += fmt.Sprintf("DB_CONNECTION=mysql\nDB_HOST=apod-%s-db\nDB_PORT=3306\n", opts.Domain)
 		envContent += fmt.Sprintf("DB_DATABASE=%s\nDB_USERNAME=%s\nDB_PASSWORD=%s\n", dbName, dbUser, dbPass)
-		keyBytes := make([]byte, 32)
-		rand.Read(keyBytes)
-		appKey := "base64:" + base64Encode(keyBytes)
+		appKey := "base64:" + randomBase64(32)
 		envContent += fmt.Sprintf("APP_KEY=%s\n", appKey)
 
 		envPath := filepath.Join(siteRoot, ".env")
-		// Only write if .env doesn't already exist (don't overwrite user config)
+		// Only write if .env doesn't already exist (don't overwrite user config).
+		// 0600: the file holds the DB password and APP_KEY.
 		if _, err := os.Stat(envPath); os.IsNotExist(err) {
-			os.WriteFile(envPath, []byte(envContent), 0644)
+			os.WriteFile(envPath, []byte(envContent), 0600)
+			if opts.Owner != "" {
+				if user, err := e.db.GetUserByName(opts.Owner); err == nil {
+					os.Chown(envPath, user.UID, user.UID)
+				}
+			}
 		}
 	}
 

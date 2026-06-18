@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/aystro/apod/internal/models"
@@ -22,8 +23,21 @@ func (dl *DriverLoader) Dir() string {
 	return dl.dir
 }
 
+var driverNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
 func (dl *DriverLoader) Load(name string) (*models.Driver, error) {
+	// Reject driver names that could escape the driver directory (path
+	// traversal) or be parsed as anything other than a plain file name. The
+	// driver name reaches here from the API/CLI; without this a name like
+	// "../../tmp/evil" would load an attacker-controlled driver (arbitrary
+	// image, host bind mounts and root sh -c setup commands).
+	if !driverNamePattern.MatchString(name) {
+		return nil, fmt.Errorf("invalid driver name %q", name)
+	}
 	path := filepath.Join(dl.dir, name+".yaml")
+	if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(dl.dir)+string(filepath.Separator)) {
+		return nil, fmt.Errorf("invalid driver name %q", name)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("driver %q not found: %w", name, err)

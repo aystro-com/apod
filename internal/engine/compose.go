@@ -292,16 +292,25 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 
 	compDir := e.composeDir(opts.Owner, opts.Domain)
 
-	// Clone the compose repo
+	// Clone the compose repo. Validate the driver-supplied repo/branch and use
+	// the same git hardening as the rest of the engine so a malicious driver
+	// definition can't inject a dangerous transport or git option.
 	branch := comp.Branch
 	if branch == "" {
 		branch = "master"
+	}
+	if err := ValidateRepo(comp.Repo); err != nil {
+		return err
+	}
+	if err := ValidateBranch(branch); err != nil {
+		return err
 	}
 
 	if comp.Path != "" {
 		tmpDir := compDir + "-tmp"
 		os.RemoveAll(tmpDir)
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", "--depth", "1", comp.Repo, tmpDir)
+		args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, tmpDir)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
 		}
@@ -312,7 +321,8 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		os.RemoveAll(tmpDir)
 	} else {
 		os.RemoveAll(compDir)
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", "--depth", "1", comp.Repo, compDir)
+		args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, compDir)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
 		}

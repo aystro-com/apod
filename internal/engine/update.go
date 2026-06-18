@@ -2,14 +2,18 @@ package engine
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 )
 
 var Version = "dev"
@@ -91,27 +95,42 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 
 	// Find tarball for current OS/arch (goreleaser format: apod_linux_amd64.tar.gz)
 	targetName := fmt.Sprintf("apod_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
-	var downloadURL string
+	var downloadURL, checksumsURL string
 	for _, asset := range release.Assets {
-		if asset.Name == targetName {
+		switch asset.Name {
+		case targetName:
 			downloadURL = asset.BrowserDownloadURL
-			break
+		case "checksums.txt":
+			checksumsURL = asset.BrowserDownloadURL
 		}
 	}
 
 	if downloadURL == "" {
 		return fmt.Errorf("no release found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, release.TagName)
 	}
+	if checksumsURL == "" {
+		return fmt.Errorf("release %s has no checksums.txt — refusing to install unverified binary", release.TagName)
+	}
 
-	// Download tarball
-	binResp, err := http.Get(downloadURL)
+	// Download tarball into memory so it can be hash-verified before use.
+	archiveData, err := httpGetBytes(downloadURL)
 	if err != nil {
 		return fmt.Errorf("download release: %w", err)
 	}
-	defer binResp.Body.Close()
+
+	// Verify the archive against the signed-by-release checksums.txt. Without
+	// this, a MITM or compromised asset URL would yield root RCE on update.
+	expected, err := fetchExpectedChecksum(checksumsURL, targetName)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(archiveData)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), expected) {
+		return fmt.Errorf("checksum mismatch for %s: refusing to install", targetName)
+	}
 
 	// Extract binary from tar.gz
-	gzr, err := gzip.NewReader(binResp.Body)
+	gzr, err := gzip.NewReader(bytes.NewReader(archiveData))
 	if err != nil {
 		return fmt.Errorf("decompress: %w", err)
 	}
@@ -168,6 +187,35 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 
 	e.LogActivity("server", "update", fmt.Sprintf("updated to %s", release.TagName), "success")
 	return nil
+}
+
+// httpGetBytes fetches a URL fully into memory, enforcing a 200 status.
+func httpGetBytes(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download %s: status %d", url, resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// fetchExpectedChecksum downloads a goreleaser-style checksums.txt and returns
+// the hex sha256 listed for assetName.
+func fetchExpectedChecksum(checksumsURL, assetName string) (string, error) {
+	data, err := httpGetBytes(checksumsURL)
+	if err != nil {
+		return "", fmt.Errorf("download checksums: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[1] == assetName {
+			return fields[0], nil
+		}
+	}
+	return "", fmt.Errorf("no checksum listed for %s", assetName)
 }
 
 func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {

@@ -84,20 +84,27 @@ func (d *DB) DeleteOldestBackups(siteDomain, storageName string, keep int) ([]st
 	}
 	defer rows.Close()
 
-	var paths []string
-	var ids []int64
+	type oldBackup struct {
+		id   int64
+		path string
+	}
+	var old []oldBackup
 	for rows.Next() {
-		var id int64
-		var path string
-		if err := rows.Scan(&id, &path); err != nil {
+		var b oldBackup
+		if err := rows.Scan(&b.id, &b.path); err != nil {
 			return nil, fmt.Errorf("scan old backup: %w", err)
 		}
-		ids = append(ids, id)
-		paths = append(paths, path)
+		old = append(old, b)
 	}
 
-	for _, id := range ids {
-		d.conn.Exec(`DELETE FROM backups WHERE id = ?`, id)
+	// Only return paths whose DB row was actually deleted, so the caller never
+	// removes a storage object while its record still exists (dangling backup).
+	var paths []string
+	for _, b := range old {
+		if _, err := d.conn.Exec(`DELETE FROM backups WHERE id = ?`, b.id); err != nil {
+			return paths, fmt.Errorf("delete old backup %d: %w", b.id, err)
+		}
+		paths = append(paths, b.path)
 	}
 
 	return paths, nil

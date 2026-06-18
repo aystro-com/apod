@@ -99,8 +99,8 @@ func (e *Engine) ListFTPAccounts(ctx context.Context, domain string) (interface{
 	return e.db.ListFTPAccounts(domain)
 }
 
-func (e *Engine) RemoveFTPAccount(ctx context.Context, username string) error {
-	return e.db.DeleteFTPAccount(username)
+func (e *Engine) RemoveFTPAccount(ctx context.Context, domain, username string) error {
+	return e.db.DeleteFTPAccountForSite(domain, username)
 }
 
 func (e *Engine) AddSSHKey(ctx context.Context, name, publicKey string) error {

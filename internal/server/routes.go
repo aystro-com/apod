@@ -107,6 +107,9 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SiteInfo(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	creds, err := h.engine.GetSiteCredentials(r.Context(), domain)
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
@@ -673,6 +676,15 @@ func (h *Handler) ExportSiteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	// Non-admins may only import sites owned by themselves; admins may specify
+	// any owner.
+	resolveOwner := func(requested string) string {
+		if user != nil && user.Role != "admin" {
+			return user.Name
+		}
+		return requested
+	}
 	contentType := r.Header.Get("Content-Type")
 
 	if contentType == "application/zip" {
@@ -692,7 +704,7 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 		tmpFile.Close()
 
 		domain := r.URL.Query().Get("domain")
-		owner := r.URL.Query().Get("owner")
+		owner := resolveOwner(r.URL.Query().Get("owner"))
 
 		if err := h.engine.ImportSite(r.Context(), tmpFile.Name(), domain, owner); err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
@@ -702,7 +714,12 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Local import — path on disk
+	// Local import — reads an arbitrary server-side path, so restrict to admins.
+	if user == nil || user.Role != "admin" {
+		respondError(w, http.StatusForbidden, "importing from a server path requires admin; upload a zip instead")
+		return
+	}
+
 	var req struct {
 		Path   string `json:"path"`
 		Domain string `json:"domain"`
@@ -1100,8 +1117,12 @@ func (h *Handler) ListFTPAccountsHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) RemoveFTPAccountHandler(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
 	username := chi.URLParam(r, "username")
-	if err := h.engine.RemoveFTPAccount(r.Context(), username); err != nil {
+	if err := h.engine.RemoveFTPAccount(r.Context(), domain, username); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

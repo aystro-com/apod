@@ -245,15 +245,36 @@ func (d *Docker) ExecInContainerAs(ctx context.Context, containerID string, cmd 
 	return string(output), nil
 }
 
-// containerSecurityOpt returns security options for a container.
-// Database images (mysql, postgres, mongo, mariadb) need gosu/su to switch users,
-// which is incompatible with no-new-privileges.
+// dbImageRepos are official database image repositories that need gosu/su to
+// switch users, which is incompatible with no-new-privileges.
+var dbImageRepos = map[string]bool{
+	"mysql": true, "mariadb": true, "postgres": true, "mongo": true, "redis": true,
+}
+
+// containerSecurityOpt returns security options for a container. The exemption
+// is keyed off the image's exact repository name (not a substring match) so a
+// driver cannot disable no-new-privileges merely by embedding "mysql" etc. in
+// an arbitrary image name like "attacker/evil-mysql".
 func containerSecurityOpt(image string) []string {
-	lower := strings.ToLower(image)
-	for _, db := range []string{"mysql", "mariadb", "postgres", "mongo", "redis"} {
-		if strings.Contains(lower, db) {
-			return nil // no security opts for database containers
-		}
+	if dbImageRepos[imageRepoName(image)] {
+		return nil // no security opts for official database containers
 	}
 	return []string{"no-new-privileges:true"}
+}
+
+// imageRepoName extracts the bare repository name from an image reference,
+// stripping any registry host, namespace, tag and digest. E.g.
+// "docker.io/library/postgres:16" -> "postgres", "attacker/evilmysql" -> "evilmysql".
+func imageRepoName(image string) string {
+	ref := strings.ToLower(strings.TrimSpace(image))
+	if i := strings.IndexByte(ref, '@'); i >= 0 { // strip digest
+		ref = ref[:i]
+	}
+	if i := strings.LastIndexByte(ref, '/'); i >= 0 { // strip registry/namespace
+		ref = ref[i+1:]
+	}
+	if i := strings.IndexByte(ref, ':'); i >= 0 { // strip tag
+		ref = ref[:i]
+	}
+	return ref
 }

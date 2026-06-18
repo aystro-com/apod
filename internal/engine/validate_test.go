@@ -129,6 +129,37 @@ func TestNormalizeSSHPublicKey(t *testing.T) {
 	}
 }
 
+func TestDriverLoadRejectsTraversal(t *testing.T) {
+	dl := NewDriverLoader(t.TempDir())
+	for _, name := range []string{"../../etc/passwd", "..", "a/b", "evil$(x)", "", "UPPER", "a.b"} {
+		if _, err := dl.Load(name); err == nil {
+			t.Errorf("Load(%q) = nil error, want rejection", name)
+		}
+	}
+}
+
+func TestImageRepoName(t *testing.T) {
+	cases := map[string]string{
+		"postgres:16":                 "postgres",
+		"docker.io/library/mysql:8":   "mysql",
+		"attacker/evil-mysql":         "evil-mysql",
+		"ghcr.io/x/redis@sha256:abcd": "redis",
+		"mariadb":                     "mariadb",
+	}
+	for in, want := range cases {
+		if got := imageRepoName(in); got != want {
+			t.Errorf("imageRepoName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// The exemption must only fire on exact repo names, not substrings.
+	if containerSecurityOpt("attacker/evil-mysql") == nil {
+		t.Error("no-new-privileges wrongly disabled for non-official image containing 'mysql'")
+	}
+	if containerSecurityOpt("postgres:16") != nil {
+		t.Error("no-new-privileges should be disabled for official postgres image")
+	}
+}
+
 func TestValidateIPRule(t *testing.T) {
 	for _, ip := range []string{"1.2.3.4", "10.0.0.0/8", "::1", "2001:db8::/32"} {
 		if err := validateIPRule(ip); err != nil {

@@ -66,8 +66,6 @@ compose:
     LOGFLARE_PUBLIC_ACCESS_TOKEN: "${logflare_public_token}"
     # Meta
     PG_META_CRYPTO_KEY: "${pg_meta_crypto_key}"
-    # Docker socket (needed by some services)
-    DOCKER_SOCKET_LOCATION: "/var/run/docker.sock"
     # Pooler
     POOLER_DB_POOL_SIZE: "20"
 

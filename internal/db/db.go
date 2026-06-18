@@ -19,7 +19,10 @@ func DefaultPath() string {
 
 func Open(path string) (*DB, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// 0700: the DB holds password/token hashes, TOTP secrets, recovery codes
+	// and (until encrypted) storage-provider credentials — keep it out of
+	// reach of other local users.
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create db directory: %w", err)
 	}
 
@@ -30,6 +33,13 @@ func Open(path string) (*DB, error) {
 
 	if err := conn.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
+	}
+
+	// Restrict the DB file (and WAL/SHM side files) to the owner.
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if _, statErr := os.Stat(p); statErr == nil {
+			os.Chmod(p, 0600)
+		}
 	}
 
 	d := &DB{conn: conn}

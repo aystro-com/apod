@@ -48,7 +48,13 @@ func (e *Engine) RemoveDomain(ctx context.Context, siteDomain, removeDomain stri
 		return fmt.Errorf("cannot remove primary domain %q", siteDomain)
 	}
 
-	if err := e.db.RemoveDomain(removeDomain); err != nil {
+	site, err := e.db.GetSite(siteDomain)
+	if err != nil {
+		return fmt.Errorf("get site: %w", err)
+	}
+	// Scope the delete to this site so a caller can't remove another tenant's
+	// alias by name (IDOR).
+	if err := e.db.RemoveDomainForSite(site.ID, removeDomain); err != nil {
 		return fmt.Errorf("remove domain: %w", err)
 	}
 

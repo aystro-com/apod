@@ -34,6 +34,19 @@ func (d *DB) RemoveDomain(domain string) error {
 	return nil
 }
 
+// RemoveDomainForSite deletes an alias only if it belongs to siteID (IDOR-safe).
+func (d *DB) RemoveDomainForSite(siteID int64, domain string) error {
+	result, err := d.conn.Exec(`DELETE FROM domains WHERE site_id = ? AND domain = ?`, siteID, domain)
+	if err != nil {
+		return fmt.Errorf("remove domain: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("domain %q not found", domain)
+	}
+	return nil
+}
+
 func (d *DB) ListDomains(siteID int64) ([]string, error) {
 	rows, err := d.conn.Query(
 		`SELECT domain FROM domains WHERE site_id = ? ORDER BY is_primary DESC, domain`,

@@ -49,3 +49,17 @@ func (d *DB) DeleteFTPAccount(username string) error {
 	_, err := d.conn.Exec(`DELETE FROM ftp_accounts WHERE username = ?`, username)
 	return err
 }
+
+// DeleteFTPAccountForSite deletes an FTP account only if it belongs to
+// siteDomain (IDOR-safe).
+func (d *DB) DeleteFTPAccountForSite(siteDomain, username string) error {
+	result, err := d.conn.Exec(`DELETE FROM ftp_accounts WHERE site_domain = ? AND username = ?`, siteDomain, username)
+	if err != nil {
+		return fmt.Errorf("delete FTP account: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("FTP account %q not found", username)
+	}
+	return nil
+}
