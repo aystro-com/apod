@@ -67,11 +67,12 @@ type DriverFile struct {
 // DriverCompose defines a docker-compose based driver.
 // Instead of individual services, apod manages the whole compose project.
 type DriverCompose struct {
-	Repo         string            `yaml:"repo"`                    // Git repo with docker-compose.yml
+	Repo         string            `yaml:"repo,omitempty"`          // Git repo with docker-compose.yml
+	File         string            `yaml:"file,omitempty"`          // Inline docker-compose.yml content (alternative to repo)
 	Branch       string            `yaml:"branch,omitempty"`        // Branch (default: master)
 	Path         string            `yaml:"path,omitempty"`          // Subdirectory in repo (e.g., "docker")
-	ProxyService string            `yaml:"proxy_service"`           // Service name Traefik routes to
-	ProxyPort    string            `yaml:"proxy_port"`              // Port on that service
+	ProxyService string            `yaml:"proxy_service,omitempty"` // Service Traefik routes to (auto-detected when empty)
+	ProxyPort    string            `yaml:"proxy_port,omitempty"`    // Port on that service (auto-detected when empty)
 	ShellService string            `yaml:"shell_service,omitempty"` // Service for apod access / terminal
 	Env          map[string]string `yaml:"env,omitempty"`           // Map driver vars to compose .env
 }
@@ -80,7 +81,7 @@ type Driver struct {
 	Name        string                   `yaml:"name"`
 	Version     string                   `yaml:"version"`
 	Description string                   `yaml:"description"`
-	Type        string                   `yaml:"type,omitempty"`    // "services" (default) or "compose"
+	Type        string                   `yaml:"type,omitempty"` // "services" (default) or "compose"
 	Parameters  map[string]DriverParam   `yaml:"parameters,omitempty"`
 	Services    map[string]DriverService `yaml:"services,omitempty"`
 	Compose     *DriverCompose           `yaml:"compose,omitempty"`

@@ -3,18 +3,20 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	flagDriver  string
-	flagRAM     string
-	flagCPU     string
-	flagStorage string
-	flagRepo    string
-	flagBranch  string
-	flagDeploy  bool
+	flagDriver      string
+	flagComposeFile string
+	flagRAM         string
+	flagCPU         string
+	flagStorage     string
+	flagRepo        string
+	flagBranch      string
+	flagDeploy      bool
 )
 
 var createCmd = &cobra.Command{
@@ -25,6 +27,10 @@ var createCmd = &cobra.Command{
 		client := NewClient(flagRemote, flagKey)
 		domain := args[0]
 
+		if flagDriver == "" && flagComposeFile == "" {
+			return fmt.Errorf("either --driver or --compose-file is required")
+		}
+
 		body := map[string]interface{}{
 			"domain":  domain,
 			"driver":  flagDriver,
@@ -33,6 +39,16 @@ var createCmd = &cobra.Command{
 			"storage": flagStorage,
 			"repo":    flagRepo,
 			"branch":  flagBranch,
+		}
+
+		// --compose-file ingests a raw docker-compose.yml directly: apod
+		// auto-detects the web service/port and runs it, no driver needed.
+		if flagComposeFile != "" {
+			content, err := os.ReadFile(flagComposeFile)
+			if err != nil {
+				return fmt.Errorf("read compose file: %w", err)
+			}
+			body["compose_file"] = string(content)
 		}
 
 		resp, err := client.Post("/api/v1/sites", body)
@@ -76,13 +92,13 @@ var createCmd = &cobra.Command{
 }
 
 func init() {
-	createCmd.Flags().StringVar(&flagDriver, "driver", "", "Driver to use (required)")
+	createCmd.Flags().StringVar(&flagDriver, "driver", "", "Driver to use (or use --compose-file)")
+	createCmd.Flags().StringVar(&flagComposeFile, "compose-file", "", "Path to a docker-compose.yml to run directly (no driver needed)")
 	createCmd.Flags().StringVar(&flagRAM, "ram", "512M", "Memory limit")
 	createCmd.Flags().StringVar(&flagCPU, "cpu", "1", "CPU limit")
 	createCmd.Flags().StringVar(&flagStorage, "storage", "0", "Disk storage limit (e.g., 5G, 500M)")
 	createCmd.Flags().StringVar(&flagRepo, "repo", "", "Git repository URL")
 	createCmd.Flags().StringVar(&flagBranch, "branch", "main", "Git branch")
 	createCmd.Flags().BoolVar(&flagDeploy, "deploy", false, "Deploy immediately after creation")
-	createCmd.MarkFlagRequired("driver")
 	rootCmd.AddCommand(createCmd)
 }

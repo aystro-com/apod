@@ -64,14 +64,15 @@ func respondEngineError(w http.ResponseWriter, err error) {
 
 func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Domain  string            `json:"domain"`
-		Driver  string            `json:"driver"`
-		RAM     string            `json:"ram"`
-		CPU     string            `json:"cpu"`
-		Storage string            `json:"storage"`
-		Repo    string            `json:"repo"`
-		Branch  string            `json:"branch"`
-		Params  map[string]string `json:"params"`
+		Domain      string            `json:"domain"`
+		Driver      string            `json:"driver"`
+		ComposeFile string            `json:"compose_file"`
+		RAM         string            `json:"ram"`
+		CPU         string            `json:"cpu"`
+		Storage     string            `json:"storage"`
+		Repo        string            `json:"repo"`
+		Branch      string            `json:"branch"`
+		Params      map[string]string `json:"params"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -79,8 +80,10 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Domain == "" || req.Driver == "" {
-		respondError(w, http.StatusBadRequest, "domain and driver are required")
+	// A site is created either from a named driver or directly from a raw
+	// docker-compose.yml (compose_file) — exactly one is required.
+	if req.Domain == "" || (req.Driver == "" && req.ComposeFile == "") {
+		respondError(w, http.StatusBadRequest, "domain and either driver or compose_file are required")
 		return
 	}
 	if !isValidDomain(req.Domain) {
@@ -95,7 +98,7 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		owner = user.Name
 	}
 
-	err := h.engine.CreateSite(r.Context(), engine.CreateSiteOpts{
+	opts := engine.CreateSiteOpts{
 		Domain:  req.Domain,
 		Driver:  req.Driver,
 		RAM:     req.RAM,
@@ -105,7 +108,13 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		Branch:  req.Branch,
 		Params:  req.Params,
 		Owner:   owner,
-	})
+	}
+	var err error
+	if req.ComposeFile != "" {
+		err = h.engine.CreateSiteFromCompose(r.Context(), opts, req.ComposeFile)
+	} else {
+		err = h.engine.CreateSite(r.Context(), opts)
+	}
 	if err != nil {
 		respondEngineError(w, err)
 		return

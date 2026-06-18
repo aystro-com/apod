@@ -343,6 +343,10 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		if createdSite, err := e.db.GetSite(opts.Domain); err == nil {
 			e.db.AddDomain(createdSite.ID, opts.Domain, true)
 		}
+		// Mark the create as complete so the deferred rollback does NOT tear the
+		// compose site back down. Without this, every successful compose site was
+		// immediately destroyed while CreateSite still returned nil.
+		provisioned = true
 		return nil
 	}
 

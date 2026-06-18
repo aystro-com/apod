@@ -284,6 +284,44 @@ func generateComposeOverride(compDir, domain, project string, services []string,
 	return os.WriteFile(filepath.Join(compDir, "docker-compose.override.yml"), []byte(override.String()), 0644)
 }
 
+// CreateSiteFromCompose stands up a site directly from a raw docker-compose.yml
+// — no git repo and no hand-written driver. It auto-detects the web service and
+// port, generates a compose driver from the file, persists it (so later
+// stop/start/destroy/exec reload it like any driver) and creates the site.
+func (e *Engine) CreateSiteFromCompose(ctx context.Context, opts CreateSiteOpts, composeContent string) error {
+	if strings.TrimSpace(composeContent) == "" {
+		return Invalid("compose file is empty")
+	}
+	// Fail fast with a clear message if no web service can be routed.
+	svc, port, err := composeWebTarget([]byte(composeContent))
+	if err != nil {
+		return Invalid("could not determine the web service from the compose file: %v — give the web service a 'ports:' entry", err)
+	}
+
+	driverName := strings.ReplaceAll(opts.Domain, ".", "-")
+	drv := &models.Driver{
+		Name:        driverName,
+		Version:     "1.0",
+		Description: "Imported from docker-compose for " + opts.Domain,
+		Type:        "compose",
+		Compose: &models.DriverCompose{
+			File:         composeContent,
+			ProxyService: svc,
+			ProxyPort:    port,
+		},
+	}
+	out, err := yaml.Marshal(drv)
+	if err != nil {
+		return fmt.Errorf("build driver from compose: %w", err)
+	}
+	if err := e.drivers.Save(driverName, string(out)); err != nil {
+		return fmt.Errorf("save generated driver: %w", err)
+	}
+
+	opts.Driver = driverName
+	return e.CreateSite(ctx, opts)
+}
+
 // CreateComposeSite creates a site using docker compose
 func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, driver *models.Driver, vars map[string]string) error {
 	comp := driver.Compose
@@ -293,39 +331,52 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 
 	compDir := e.composeDir(opts.Owner, opts.Domain)
 
-	// Clone the compose repo. Validate the driver-supplied repo/branch and use
-	// the same git hardening as the rest of the engine so a malicious driver
-	// definition can't inject a dangerous transport or git option.
-	branch := comp.Branch
-	if branch == "" {
-		branch = "master"
-	}
-	if err := ValidateRepo(comp.Repo); err != nil {
-		return err
-	}
-	if err := ValidateBranch(branch); err != nil {
-		return err
-	}
-
-	if comp.Path != "" {
-		tmpDir := compDir + "-tmp"
-		os.RemoveAll(tmpDir)
-		args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, tmpDir)
-		cmd := exec.CommandContext(ctx, "git", args...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
-		}
+	// A compose site sources its docker-compose.yml either inline (comp.File —
+	// a raw compose pasted/uploaded by the user) or from a git repo. Inline is
+	// what lets apod ingest a stock docker-compose.yml with no wrapper.
+	if comp.File != "" {
 		os.RemoveAll(compDir)
-		if err := os.Rename(filepath.Join(tmpDir, comp.Path), compDir); err != nil {
-			return fmt.Errorf("move compose subdir: %w", err)
+		if err := os.MkdirAll(compDir, 0755); err != nil {
+			return fmt.Errorf("create compose dir: %w", err)
 		}
-		os.RemoveAll(tmpDir)
+		if err := os.WriteFile(filepath.Join(compDir, "docker-compose.yml"), []byte(comp.File), 0644); err != nil {
+			return fmt.Errorf("write inline compose file: %w", err)
+		}
 	} else {
-		os.RemoveAll(compDir)
-		args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, compDir)
-		cmd := exec.CommandContext(ctx, "git", args...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
+		// Clone the compose repo. Validate the driver-supplied repo/branch and
+		// use the same git hardening as the rest of the engine so a malicious
+		// driver definition can't inject a dangerous transport or git option.
+		branch := comp.Branch
+		if branch == "" {
+			branch = "master"
+		}
+		if err := ValidateRepo(comp.Repo); err != nil {
+			return err
+		}
+		if err := ValidateBranch(branch); err != nil {
+			return err
+		}
+
+		if comp.Path != "" {
+			tmpDir := compDir + "-tmp"
+			os.RemoveAll(tmpDir)
+			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, tmpDir)
+			cmd := exec.CommandContext(ctx, "git", args...)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
+			}
+			os.RemoveAll(compDir)
+			if err := os.Rename(filepath.Join(tmpDir, comp.Path), compDir); err != nil {
+				return fmt.Errorf("move compose subdir: %w", err)
+			}
+			os.RemoveAll(tmpDir)
+		} else {
+			os.RemoveAll(compDir)
+			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--single-branch", "--depth", "1", "--", comp.Repo, compDir)
+			cmd := exec.CommandContext(ctx, "git", args...)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("clone compose repo: %s: %w", string(output), err)
+			}
 		}
 	}
 
@@ -378,8 +429,26 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		os.WriteFile(path, []byte(content), perm)
 	}
 
-	// Sanitize compose file for multi-instance support
 	composeFile := filepath.Join(compDir, "docker-compose.yml")
+
+	// Auto-detect the web service/port to route to when the driver doesn't
+	// specify them — this must happen BEFORE sanitize strips the ports. It lets
+	// a stock compose file run with no hand-written proxy_service/proxy_port.
+	proxyService, proxyPort := comp.ProxyService, comp.ProxyPort
+	if proxyService == "" || proxyPort == "" {
+		if raw, rerr := os.ReadFile(composeFile); rerr == nil {
+			if svc, port, derr := composeWebTarget(raw); derr == nil {
+				if proxyService == "" {
+					proxyService = svc
+				}
+				if proxyPort == "" {
+					proxyPort = port
+				}
+			}
+		}
+	}
+
+	// Sanitize compose file for multi-instance support
 	if err := sanitizeComposeFile(composeFile); err != nil {
 		return fmt.Errorf("sanitize compose file: %w", err)
 	}
@@ -428,7 +497,7 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 	e.docker.ConnectNetwork(ctx, composeNetwork, "apod-traefik")
 
 	// Write Traefik routing config
-	if comp.ProxyService != "" && comp.ProxyPort != "" {
+	if proxyService != "" && proxyPort != "" {
 		routerName := strings.ReplaceAll(opts.Domain, ".", "-")
 
 		traefikConfig := fmt.Sprintf(`[http.routers.%s]
@@ -448,7 +517,7 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
     url = "http://%s:%s"
 `, routerName, opts.Domain, routerName, routerName,
 			routerName, opts.Domain, routerName,
-			routerName, routerName, comp.ProxyService, comp.ProxyPort)
+			routerName, routerName, proxyService, proxyPort)
 
 		traefikDir := "/etc/apod/traefik/dynamic"
 		os.MkdirAll(traefikDir, 0755)
