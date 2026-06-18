@@ -46,5 +46,9 @@ backup:
 
 setup:
   - name: "Wait for database"
-    command: "mysqladmin ping -h apod-${site_domain}-db --wait=30"
+    # Use PHP (always present in the WordPress image) to wait for the DB port —
+    # the image has no mysql client, so mysqladmin failed with "not found",
+    # which rolled back the whole site. Best-effort: never fail the deploy over
+    # the wait (WordPress retries the connection itself).
+    command: "php -r 'for($i=0;$i<60;$i++){if($c=@fsockopen(\"apod-${site_domain}-db\",3306)){fclose($c);break;}sleep(1);}'"
     service: app
