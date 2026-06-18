@@ -8,9 +8,10 @@
 # Binary
 /apod
 
-# Markdown (except README)
+# Markdown: ignore stray notes at the repo root, but keep README and docs/
 *.md
 !README.md
+!docs/**/*.md
 
 # Superpowers internal
 docs/superpowers/
