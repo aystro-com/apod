@@ -159,7 +159,7 @@ type CreateSiteOpts struct {
 	SkipClone bool
 }
 
-func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
+func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error) {
 	if err := ValidateDomain(opts.Domain); err != nil {
 		return err
 	}
@@ -217,6 +217,19 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 			return fmt.Errorf("create site record: %w", err)
 		}
 	}
+
+	// From here on the site record exists and we start creating real resources.
+	// If anything below fails, tear it all back down so a failed create never
+	// leaves orphan containers, networks, files or a half-built record.
+	provisioned := false
+	defer func() {
+		if !provisioned {
+			e.rollbackPartialCreate(opts.Domain, opts.Owner)
+			if err != nil {
+				e.LogActivity(opts.Domain, "create", err.Error(), "rolled-back")
+			}
+		}
+	}()
 
 	siteRoot, dataRoot := e.SiteDir(opts.Owner, opts.Domain)
 	if err := os.MkdirAll(siteRoot, 0755); err != nil {
@@ -298,6 +311,15 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		}
 	}
 	ExpandDriverVariables(driver, vars)
+
+	// Persist generated secrets as the authoritative record (backup/clone read
+	// these instead of reverse-engineering them from container env or .env).
+	e.db.SetSiteSecret(opts.Domain, "db_password", dbPass)
+	for _, varName := range genOrder {
+		if v, ok := vars[varName]; ok {
+			e.db.SetSiteSecret(opts.Domain, varName, v)
+		}
+	}
 
 	// Write driver files before container creation (e.g., kong.yml, init SQL)
 	for _, f := range driver.Files {
@@ -483,7 +505,26 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) error {
 		e.ApplyDiskQuota(ctx, opts.Owner)
 	}
 
+	provisioned = true
 	return nil
+}
+
+// rollbackPartialCreate tears down the resources of a site whose creation failed
+// partway through, leaving no orphan containers, network, files or DB records.
+func (e *Engine) rollbackPartialCreate(domain, owner string) {
+	ctx := context.Background()
+	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
+	for _, id := range ids {
+		e.docker.StopContainer(ctx, id)
+		e.docker.RemoveContainer(ctx, id)
+	}
+	e.docker.RemoveNetwork(ctx, fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-")))
+	siteRoot, dataRoot := e.SiteDir(owner, domain)
+	os.RemoveAll(siteRoot)
+	os.RemoveAll(dataRoot)
+	e.db.DeleteProcessScaling(domain)
+	e.db.DeleteSiteSecrets(domain)
+	e.db.DeleteSite(domain)
 }
 
 func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) error {
@@ -530,8 +571,9 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	// Remove the site's IP allowlist middleware file.
 	os.Remove(filepath.Join(traefikDynamicDir, ipAllowMiddlewareName(domain)+".toml"))
 
-	// Drop any per-service scaling overrides.
+	// Drop any per-service scaling overrides and stored secrets.
 	e.db.DeleteProcessScaling(domain)
+	e.db.DeleteSiteSecrets(domain)
 
 	if purge {
 		siteDir := filepath.Join(e.dataDir, "sites", domain)

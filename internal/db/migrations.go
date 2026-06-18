@@ -182,6 +182,12 @@ var migrations = []struct {
 		replicas    INTEGER NOT NULL,
 		PRIMARY KEY (site_domain, service)
 	)`},
+	{29, `CREATE TABLE IF NOT EXISTS site_secrets (
+		site_domain TEXT NOT NULL,
+		key         TEXT NOT NULL,
+		value       TEXT NOT NULL,
+		PRIMARY KEY (site_domain, key)
+	)`},
 }
 
 func (d *DB) migrate() error {

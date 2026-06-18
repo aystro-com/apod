@@ -65,10 +65,45 @@ func dbRestoreCommand(dbType, dbName, dbUser, dumpFile string) []string {
 	}
 }
 
-// sourceDBPassword reads the live database password from a site's DB service
-// container(s), trying the common per-engine env keys. Returns "" if no DB
-// service is declared or none expose a password.
+// dbVolumeDirs returns the set of top-level subdirectories under data_root that
+// hold a database service's files (derived from the driver's backed-up DB
+// services and their volume mounts). These are excluded from physical archiving
+// and physical restore — the logical dump is the source of truth, and a hot copy
+// of a live DB datadir is not crash-consistent.
+func dbVolumeDirs(driver *models.Driver) map[string]bool {
+	out := map[string]bool{}
+	for _, dbCfg := range driver.Backup.Databases {
+		svc, ok := driver.Services[dbCfg.Service]
+		if !ok {
+			continue
+		}
+		for _, vol := range svc.Volumes {
+			host := vol
+			if i := strings.Index(host, ":"); i >= 0 {
+				host = host[:i]
+			}
+			host = strings.TrimPrefix(host, "${data_root}")
+			host = strings.TrimPrefix(host, "/")
+			if host == "" {
+				continue
+			}
+			if i := strings.Index(host, "/"); i >= 0 {
+				host = host[:i]
+			}
+			out[host] = true
+		}
+	}
+	return out
+}
+
+// sourceDBPassword returns a site's database password. The authoritative source
+// is the secrets store; for legacy sites created before it existed, it falls
+// back to reading the live DB service container's env. Returns "" if neither
+// has it.
 func (e *Engine) sourceDBPassword(ctx context.Context, domain string, driver *models.Driver) string {
+	if v, ok, _ := e.db.GetSiteSecret(domain, "db_password"); ok && v != "" {
+		return v
+	}
 	keys := []string{"MYSQL_PASSWORD", "MARIADB_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD"}
 	for _, dbCfg := range driver.Backup.Databases {
 		cname := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
@@ -270,6 +305,12 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		}
 	}
 
+	// A database service's raw data directory is intentionally NOT archived: the
+	// logical dump is the source of truth, and a hot copy of a live datadir is
+	// not crash-consistent (and never restored). Exclude those subdirs of
+	// data_root from the physical archive.
+	dbDirs := dbVolumeDirs(driver)
+
 	// Copy files from all backup paths
 	for expanded, prefix := range backupPaths {
 		filepath.Walk(expanded, func(path string, info os.FileInfo, err error) error {
@@ -277,6 +318,15 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 				return nil
 			}
 			relPath, _ := filepath.Rel(expanded, path)
+			if prefix == "data" {
+				top := relPath
+				if i := strings.IndexByte(top, filepath.Separator); i >= 0 {
+					top = top[:i]
+				}
+				if dbDirs[top] {
+					return nil // skip DB datadir — covered by the logical dump
+				}
+			}
 			w, _ := zw.Create(filepath.Join(prefix, relPath))
 			f, err := os.Open(path)
 			if err != nil {

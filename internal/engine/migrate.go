@@ -304,30 +304,11 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner strin
 	// Never restore a database service's raw data directory — see the strategy
 	// note above. The DB is rebuilt from its logical dump below; restoring the
 	// datadir would make the new container boot on a non-empty volume (skipping
-	// init) and, for Postgres, panic on an inconsistent hot copy.
+	// init) and, for Postgres, panic on an inconsistent hot copy. (New backups
+	// no longer archive these dirs at all; this also guards older archives.)
 	skipDataDirs := map[string]bool{}
 	if drv, derr := e.drivers.Load(meta.Driver); derr == nil {
-		for _, dbCfg := range drv.Backup.Databases {
-			svc, ok := drv.Services[dbCfg.Service]
-			if !ok {
-				continue
-			}
-			for _, vol := range svc.Volumes {
-				host := vol
-				if i := strings.Index(host, ":"); i >= 0 {
-					host = host[:i]
-				}
-				host = strings.TrimPrefix(host, "${data_root}")
-				host = strings.TrimPrefix(host, "/")
-				if host == "" {
-					continue
-				}
-				if i := strings.Index(host, "/"); i >= 0 {
-					host = host[:i]
-				}
-				skipDataDirs[host] = true
-			}
-		}
+		skipDataDirs = dbVolumeDirs(drv)
 	}
 
 	// Extract files and data
