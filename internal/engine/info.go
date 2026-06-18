@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/aystro/apod/internal/models"
 )
 
 // SiteCredentials holds user-facing credentials for a site
@@ -51,8 +53,11 @@ func (e *Engine) GetSiteCredentials(ctx context.Context, domain string) (*SiteCr
 				}
 			}
 		}
-	} else {
-		// Normal site — show DB name/user (password is in container env)
+	} else if driverHasDatabase(driver) {
+		// Normal site with a database — show DB name/user (password is in the
+		// container env). Stateless drivers (apod-ui, static) have no DB, so we
+		// skip these rather than show credentials for a database that doesn't
+		// exist.
 		dbName := strings.ReplaceAll(domain, ".", "_")
 		creds.Secrets["DB_NAME"] = dbName
 		creds.Secrets["DB_USER"] = dbName
@@ -60,6 +65,22 @@ func (e *Engine) GetSiteCredentials(ctx context.Context, domain string) (*SiteCr
 	}
 
 	return creds, nil
+}
+
+// driverHasDatabase reports whether a driver provisions its own database — i.e.
+// it declares a backup database or ships a service named "db". Used to avoid
+// surfacing DB credentials for stateless drivers that have none.
+func driverHasDatabase(driver *models.Driver) bool {
+	if driver == nil {
+		return false
+	}
+	if len(driver.Backup.Databases) > 0 {
+		return true
+	}
+	if _, ok := driver.Services["db"]; ok {
+		return true
+	}
+	return false
 }
 
 func parseEnvFile(content string) map[string]string {

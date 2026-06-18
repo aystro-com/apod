@@ -100,7 +100,10 @@ backup:
 
 setup:
   - name: "Wait for database"
-    command: "sleep 10 && mysqladmin ping -h apod-${site_domain}-db --wait=30 2>/dev/null || sleep 5"
+    # Wait on the DB port with PHP (always present) rather than mysqladmin,
+    # which isn't guaranteed in every image — a missing client silently turned
+    # this into a blind sleep. Best-effort: Laravel retries connections itself.
+    command: "php -r 'for($i=0;$i<60;$i++){if($c=@fsockopen(\"apod-${site_domain}-db\",3306)){fclose($c);break;}sleep(1);}'"
     service: app
     optional: true
   - name: "Generate .env if missing"
