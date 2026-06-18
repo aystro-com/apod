@@ -654,8 +654,16 @@ func (h *Handler) NewSiteFromBackupHandler(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.engine.CreateSiteFromBackup(r.Context(), req.BackupID, req.NewDomain, req.Owner); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+	// Non-admins may only create the new site under their own account; a
+	// caller-supplied owner would otherwise let a user plant sites (and consume
+	// quota / place files) under another identity.
+	user := UserFromContext(r.Context())
+	owner := req.Owner
+	if user != nil && user.Role != "admin" {
+		owner = user.Name
+	}
+	if err := h.engine.CreateSiteFromBackup(r.Context(), domain, req.BackupID, req.NewDomain, owner); err != nil {
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "created", "domain": req.NewDomain})

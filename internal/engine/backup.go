@@ -448,7 +448,7 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 // layout as an export (metadata.json + files/ + data/ + databases/), so this
 // downloads it and reuses the import path with a fresh domain. Owner defaults to
 // the source site's owner when empty.
-func (e *Engine) CreateSiteFromBackup(ctx context.Context, backupID int64, newDomain, owner string) error {
+func (e *Engine) CreateSiteFromBackup(ctx context.Context, sourceDomain string, backupID int64, newDomain, owner string) error {
 	if err := ValidateDomain(newDomain); err != nil {
 		return err
 	}
@@ -456,6 +456,12 @@ func (e *Engine) CreateSiteFromBackup(ctx context.Context, backupID int64, newDo
 	backup, err := e.db.GetBackup(backupID)
 	if err != nil {
 		return fmt.Errorf("get backup: %w", err)
+	}
+	// The backup must belong to the site the caller was authorized against —
+	// otherwise a user could clone another tenant's backup (and its files, DB,
+	// and secrets) by passing an arbitrary backup_id.
+	if backup.SiteDomain != sourceDomain {
+		return NotFound("backup %d not found for site %q", backupID, sourceDomain)
 	}
 	if newDomain == backup.SiteDomain {
 		return Invalid("new domain must differ from the source site %q", backup.SiteDomain)
