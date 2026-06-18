@@ -75,6 +75,18 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 	// Create deployment record
 	depID, _ := e.db.CreateDeployment(domain, commitHash, branch)
 
+	// Restart containers BEFORE running hooks. The git update above may have
+	// re-created siteRoot (the non-fast-forward path does rm -rf + clone), which
+	// orphans the containers' bind mount of it — Linux binds pin the inode, not
+	// the path, so the containers would otherwise see an empty /app. Restarting
+	// re-binds the mount to the fresh code so before_deploy (composer install,
+	// etc.) actually sees it.
+	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
+	for _, id := range ids {
+		e.docker.StopContainer(ctx, id)
+		e.docker.StartContainer(ctx, id)
+	}
+
 	// Run before_deploy hooks
 	containerName := fmt.Sprintf("apod-%s-app", domain)
 	for _, hook := range driver.Deploy.BeforeDeploy {
@@ -84,13 +96,6 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 			e.LogActivity(domain, "deploy", "hook failed: "+hook, "failed")
 			return fmt.Errorf("before_deploy hook %q: %w", hook, err)
 		}
-	}
-
-	// Restart containers (simple deploy — stop/start)
-	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
-	for _, id := range ids {
-		e.docker.StopContainer(ctx, id)
-		e.docker.StartContainer(ctx, id)
 	}
 
 	// Run after_deploy hooks

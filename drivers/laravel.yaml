@@ -106,7 +106,7 @@ setup:
     command: "cd /app && if [ ! -f .env ]; then cp .env.example .env 2>/dev/null || touch .env; fi"
     service: app
   - name: "Generate app key if empty"
-    command: "cd /app && if ! grep -q 'APP_KEY=base64' .env; then php artisan key:generate --force; fi"
+    command: "cd /app && if [ -f artisan ] && ! grep -q 'APP_KEY=base64' .env 2>/dev/null; then php artisan key:generate --force; fi"
     service: app
   - name: "Install dependencies"
     command: "cd /app && composer install --no-dev --optimize-autoloader --no-interaction 2>/dev/null || true"
