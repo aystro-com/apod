@@ -44,3 +44,24 @@ func TestDeleteSiteChildData(t *testing.T) {
 		t.Errorf("ip rules not cleared: %d remain", len(rules))
 	}
 }
+
+// AddIPRule must upsert (one row per site+ip), not accumulate duplicates.
+func TestAddIPRuleUpserts(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	const domain = "ip.test"
+	if err := d.AddIPRule(domain, "10.0.0.0/8", "allow"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.AddIPRule(domain, "10.0.0.0/8", "allow"); err != nil {
+		t.Fatal(err)
+	}
+	rules, _ := d.ListIPRules(domain)
+	if len(rules) != 1 {
+		t.Errorf("expected 1 rule after re-adding the same IP, got %d", len(rules))
+	}
+}

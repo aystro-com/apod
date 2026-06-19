@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -265,8 +266,12 @@ func (e *Engine) UpdateDrivers(ctx context.Context) ([]string, error) {
 			continue
 		}
 
-		driverPath := fmt.Sprintf("%s/%s", e.drivers.Dir(), name)
-		if err := os.WriteFile(driverPath, body, 0644); err != nil {
+		// Route the write through Save, which validates the driver name (no path
+		// traversal) and parses/validates the YAML before persisting — instead of
+		// fmt.Sprintf-ing the path and writing unverified bytes.
+		driverName := strings.TrimSuffix(name, ".yaml")
+		if err := e.drivers.Save(driverName, string(body)); err != nil {
+			log.Printf("driver update %s: %v", name, err)
 			continue
 		}
 		updated = append(updated, name)

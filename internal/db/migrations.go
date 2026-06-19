@@ -199,6 +199,11 @@ var migrations = []struct {
 		PRIMARY KEY (network, site_domain)
 	)`},
 	{32, `ALTER TABLE users ADD COLUMN can_create_sites INTEGER NOT NULL DEFAULT 0`},
+	// Enforce one rule per (site, ip). Dedup any pre-existing duplicates first
+	// (keep the most recent), then add the unique index that AddIPRule's upsert
+	// relies on. (mattn/go-sqlite3 runs both statements in the one migration tx.)
+	{33, `DELETE FROM ip_rules WHERE rowid NOT IN (SELECT MAX(rowid) FROM ip_rules GROUP BY site_domain, ip);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_rules_site_ip ON ip_rules(site_domain, ip);`},
 }
 
 func (d *DB) migrate() error {

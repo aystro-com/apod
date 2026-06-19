@@ -23,10 +23,14 @@ func (d *DB) AddIPRule(siteDomain, ip, action string) error {
 	if action != "allow" && action != "block" {
 		return fmt.Errorf("invalid action %q", action)
 	}
-	if _, err := d.conn.Exec(`DELETE FROM ip_rules WHERE site_domain = ? AND ip = ?`, siteDomain, ip); err != nil {
-		return fmt.Errorf("replace IP rule: %w", err)
-	}
-	if _, err := d.conn.Exec(`INSERT INTO ip_rules (site_domain, ip, action) VALUES (?, ?, ?)`, siteDomain, ip, action); err != nil {
+	// Atomic upsert (relies on the UNIQUE(site_domain, ip) index from migration
+	// 33) — replaces the prior non-transactional delete-then-insert, which could
+	// leave an IP with no rule if it failed between the two statements.
+	if _, err := d.conn.Exec(
+		`INSERT INTO ip_rules (site_domain, ip, action) VALUES (?, ?, ?)
+		 ON CONFLICT(site_domain, ip) DO UPDATE SET action = excluded.action`,
+		siteDomain, ip, action,
+	); err != nil {
 		return fmt.Errorf("add IP rule: %w", err)
 	}
 	return nil
