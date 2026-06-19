@@ -119,8 +119,15 @@ func TestNewSFTPValidation(t *testing.T) {
 	if _, err := NewSFTP(map[string]string{"host": "h"}); err == nil {
 		t.Error("sftp without user should error")
 	}
+	// Fail closed: no host_key and no explicit opt-in must be rejected.
+	if _, err := NewSFTP(map[string]string{"host": "h", "user": "u"}); err == nil {
+		t.Error("sftp without host_key or opt-in should error")
+	}
 
-	s, err := NewSFTP(map[string]string{"host": "h", "user": "u"})
+	// Explicit insecure opt-in is accepted (and defaults are applied).
+	s, err := NewSFTP(map[string]string{
+		"host": "h", "user": "u", "insecure_skip_host_key": "true",
+	})
 	if err != nil {
 		t.Fatalf("valid sftp: %v", err)
 	}
@@ -142,5 +149,22 @@ func TestNewSFTPHostKeyPinned(t *testing.T) {
 	}
 	if !strings.Contains(s.hostKey, "ssh-ed25519") {
 		t.Errorf("pinned host key not stored: %q", s.hostKey)
+	}
+}
+
+func TestS3EndpointRequiresHTTPS(t *testing.T) {
+	// Cleartext endpoint without opt-in is rejected.
+	if _, err := New("s3", map[string]string{"bucket": "b", "endpoint": "http://minio.local:9000"}); err == nil {
+		t.Error("http endpoint without opt-in should be rejected")
+	}
+	// https is fine.
+	if _, err := New("s3", map[string]string{"bucket": "b", "endpoint": "https://minio.local:9000"}); err != nil {
+		t.Errorf("https endpoint should be accepted: %v", err)
+	}
+}
+
+func TestR2RejectsBadAccountID(t *testing.T) {
+	if _, err := New("r2", map[string]string{"bucket": "b", "account_id": "evil.com/x"}); err == nil {
+		t.Error("account_id with host-breaking chars should be rejected")
 	}
 }

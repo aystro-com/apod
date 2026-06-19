@@ -40,6 +40,13 @@ func NewS3(config map[string]string) (*S3Storage, error) {
 
 	var opts []func(*s3.Options)
 	if endpoint := config["endpoint"]; endpoint != "" {
+		// A custom endpoint receives the credentials and the backup stream.
+		// Require https so they aren't sent in cleartext; an explicit opt-in
+		// allows http for trusted internal/dev endpoints (e.g. MinIO).
+		allowInsecure := strings.EqualFold(strings.TrimSpace(config["insecure_endpoint"]), "true")
+		if err := validateEndpointURL(endpoint, allowInsecure); err != nil {
+			return nil, fmt.Errorf("s3: %w", err)
+		}
 		opts = append(opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
 			o.UsePathStyle = true

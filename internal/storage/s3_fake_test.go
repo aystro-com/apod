@@ -84,11 +84,12 @@ func newFakeS3Storage(t *testing.T) (*S3Storage, *fakeS3) {
 	t.Cleanup(ts.Close)
 
 	s, err := New("s3", map[string]string{
-		"bucket":     "backups",
-		"endpoint":   ts.URL,
-		"region":     "us-east-1",
-		"access_key": "test",
-		"secret_key": "test",
+		"bucket":            "backups",
+		"endpoint":          ts.URL, // httptest serves http
+		"insecure_endpoint": "true",
+		"region":            "us-east-1",
+		"access_key":        "test",
+		"secret_key":        "test",
 	})
 	if err != nil {
 		t.Fatalf("New s3: %v", err)
