@@ -102,3 +102,12 @@ func TestFinishOpErrorIsTerminalAndSanitized(t *testing.T) {
 		t.Errorf("error detail = %q, want sanitized first line %q", last.Detail, "boom")
 	}
 }
+
+// BlockIP must reject rather than create a rule that the Traefik allow-list
+// can't enforce (it was silently a no-op, a false sense of security).
+func TestBlockIPRejected(t *testing.T) {
+	e := &Engine{}
+	if err := e.BlockIP(t.Context(), "ex.com", "1.2.3.4"); err == nil {
+		t.Error("BlockIP should return an error, not silently no-op")
+	}
+}

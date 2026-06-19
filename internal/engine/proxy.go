@@ -107,17 +107,12 @@ func (e *Engine) AllowIP(ctx context.Context, domain, ip string) error {
 }
 
 func (e *Engine) BlockIP(ctx context.Context, domain, ip string) error {
-	if err := validateIPRule(ip); err != nil {
-		return err
-	}
-	if err := e.db.BlockIP(domain, ip); err != nil {
-		return err
-	}
-	if err := e.ApplyIPRules(domain); err != nil {
-		return err
-	}
-	e.LogActivity(domain, "ip_block", ip, "success")
-	return nil
+	// Access is enforced by a Traefik allow-list middleware, which can only
+	// express "allow these, deny everything else" — there is no deny-list. A
+	// "block" rule was therefore stored and reported success but never applied,
+	// giving a false sense of security. Reject it with an actionable error rather
+	// than silently doing nothing.
+	return Invalid("blocking individual IPs isn't supported — restrict access with an Allow rule instead; any address not explicitly allowed is denied")
 }
 
 func (e *Engine) UnblockIP(ctx context.Context, domain, ip string) error {
