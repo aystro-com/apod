@@ -36,6 +36,24 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# Sign the checksum manifest with cosign (keyless / OIDC) so the integrity of a
+# release doesn't rest on GitHub account security alone — install.sh and the
+# self-updater can verify checksums.txt.sig against the release identity before
+# trusting any checksum. Requires cosign in the release workflow; --yes avoids
+# the interactive confirmation.
+signs:
+  - cmd: cosign
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    output: true
+
 release:
   github:
     owner: aystro-com

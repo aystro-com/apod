@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # cosign keyless signing via OIDC
 
 jobs:
   release:
@@ -24,6 +25,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - uses: sigstore/cosign-installer@v3 # provides `cosign` for the signs: block
 
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
