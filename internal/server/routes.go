@@ -1048,7 +1048,12 @@ func (h *Handler) ImportSiteHandler(w http.ResponseWriter, r *http.Request) {
 
 		domain := r.URL.Query().Get("domain")
 		owner := resolveOwner(r.URL.Query().Get("owner"))
-		passphrase := r.URL.Query().Get("passphrase")
+		// Prefer the passphrase header (not logged like a query string); fall back
+		// to the query param for older CLIs.
+		passphrase := r.Header.Get("X-Apod-Passphrase")
+		if passphrase == "" {
+			passphrase = r.URL.Query().Get("passphrase")
+		}
 
 		if err := h.engine.ImportSite(r.Context(), tmpFile.Name(), domain, owner, passphrase); err != nil {
 			respondEngineError(w, err)

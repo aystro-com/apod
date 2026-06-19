@@ -94,9 +94,6 @@ func importRemote(zipPath, domain, owner, passphrase string) error {
 	if owner != "" {
 		q.Set("owner", owner)
 	}
-	if passphrase != "" {
-		q.Set("passphrase", passphrase)
-	}
 	url := flagRemote + "/api/v1/import"
 	if encoded := q.Encode(); encoded != "" {
 		url += "?" + encoded
@@ -104,6 +101,11 @@ func importRemote(zipPath, domain, owner, passphrase string) error {
 
 	req, _ := http.NewRequest("POST", url, f)
 	req.Header.Set("Content-Type", "application/zip")
+	// Send the passphrase in a header, not the query string — query strings are
+	// routinely captured by proxy access logs, browser history and `ps`.
+	if passphrase != "" {
+		req.Header.Set("X-Apod-Passphrase", passphrase)
+	}
 	if flagKey != "" {
 		req.Header.Set("Authorization", "Bearer "+flagKey)
 	}

@@ -80,8 +80,10 @@ var cronRemoveCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
-		var id int64
-		fmt.Sscanf(args[1], "%d", &id)
+		id, perr := parseID(args[1])
+		if perr != nil {
+			return perr
+		}
 		body := map[string]int64{"id": id}
 		_, err := client.Delete2(fmt.Sprintf("/api/v1/sites/%s/cron", args[0]), body)
 		if err != nil {

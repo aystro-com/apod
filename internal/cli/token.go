@@ -99,8 +99,10 @@ var tokenRevokeCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
-		var id int64
-		fmt.Sscanf(args[0], "%d", &id)
+		id, perr := parseID(args[0])
+		if perr != nil {
+			return perr
+		}
 		_, err := client.Delete2("/api/v1/tokens", map[string]interface{}{"id": id})
 		if err != nil {
 			return err

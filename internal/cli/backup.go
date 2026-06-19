@@ -72,8 +72,10 @@ var backupRestoreCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
-		var backupID int64
-		fmt.Sscanf(args[1], "%d", &backupID)
+		backupID, perr := parseID(args[1])
+		if perr != nil {
+			return perr
+		}
 		body := map[string]int64{"backup_id": backupID}
 		_, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/backups/restore", args[0]), body)
 		if err != nil {
@@ -92,8 +94,10 @@ var backupNewSiteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
-		var backupID int64
-		fmt.Sscanf(args[1], "%d", &backupID)
+		backupID, perr := parseID(args[1])
+		if perr != nil {
+			return perr
+		}
 		body := map[string]interface{}{"backup_id": backupID, "new_domain": args[2], "owner": backupNewSiteOwner}
 		if _, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/backups/new-site", args[0]), body); err != nil {
 			return err
@@ -109,8 +113,10 @@ var backupDeleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
-		var backupID int64
-		fmt.Sscanf(args[1], "%d", &backupID)
+		backupID, perr := parseID(args[1])
+		if perr != nil {
+			return perr
+		}
 		body := map[string]int64{"backup_id": backupID}
 		_, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/backups/delete", args[0]), body)
 		if err != nil {
@@ -185,8 +191,10 @@ var backupScheduleRemoveCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
-		var scheduleID int64
-		fmt.Sscanf(args[1], "%d", &scheduleID)
+		scheduleID, perr := parseID(args[1])
+		if perr != nil {
+			return perr
+		}
 		body := map[string]int64{"schedule_id": scheduleID}
 		_, err := client.Delete2(fmt.Sprintf("/api/v1/sites/%s/backups/schedule", args[0]), body)
 		if err != nil {

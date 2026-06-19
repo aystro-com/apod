@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 )
 
 const defaultSocketPath = "/run/apod/apod.sock"
@@ -103,4 +104,15 @@ func (c *Client) Delete(path string) (*apiResponse, error) {
 // target in the payload (e.g. token revocation).
 func (c *Client) Delete2(path string, body interface{}) (*apiResponse, error) {
 	return c.do("DELETE", path, body)
+}
+
+// parseID parses a positive integer command-line argument (a backup/cron/proxy/
+// token id), returning a clear error instead of silently acting on 0 the way an
+// ignored fmt.Sscanf would.
+func parseID(arg string) (int64, error) {
+	id, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid id %q: must be a positive integer", arg)
+	}
+	return id, nil
 }
