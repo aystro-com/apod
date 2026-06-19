@@ -78,7 +78,11 @@ setup:
     service: app
     optional: true
   - name: "Download Paymenter"
-    command: "cd /app && if [ ! -f artisan ]; then curl -Lo paymenter.tar.gz https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz && tar -xzf paymenter.tar.gz && rm paymenter.tar.gz; fi"
+    # -fSL: fail on an HTTP error instead of saving a 404 page. The trailing
+    # tests make the step fail loudly (rolling the site back with a clear error)
+    # if the archive didn't produce the expected layout — rather than leaving an
+    # empty /app that nginx serves as a 500.
+    command: "cd /app && if [ ! -f artisan ]; then curl -fSL https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz -o /tmp/pm.tar.gz && tar -xzf /tmp/pm.tar.gz -C /app && rm -f /tmp/pm.tar.gz; fi && test -f /app/artisan && test -d /app/public"
     service: app
   - name: "Fix permissions"
     command: "cd /app && chmod -R 777 storage bootstrap/cache"
