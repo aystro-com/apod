@@ -278,14 +278,16 @@ func (e *Engine) serviceContainers(ctx context.Context, domain, svcName string) 
 // existing one so they share the same image, env (including generated secrets),
 // command, and limits. Only worker-role services can be scaled.
 func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, replicas int) error {
+	// Validate the cheap, stateless input before taking the lock so a bad request
+	// doesn't block concurrent operations on the site.
+	if replicas < 0 || replicas > maxReplicas {
+		return Invalid("replicas must be between 0 and %d", maxReplicas)
+	}
 	if err := e.locks.Acquire(domain, "scaling"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
 
-	if replicas < 0 || replicas > maxReplicas {
-		return Invalid("replicas must be between 0 and %d", maxReplicas)
-	}
 	site, err := e.db.GetSite(domain)
 	if err != nil || site == nil {
 		return NotFound("site %q not found", domain)
@@ -302,10 +304,13 @@ func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, repli
 		return Invalid("service %q is not a scalable worker", svcName)
 	}
 
-	if err := e.db.SetProcessReplicas(domain, svcName, replicas); err != nil {
+	// Reconcile the containers FIRST, then persist the desired count — otherwise
+	// a mid-reconcile failure leaves the DB claiming N replicas while fewer are
+	// actually running, with nothing to re-drive it.
+	if err := e.reconcileService(ctx, domain, svcName, replicas); err != nil {
 		return err
 	}
-	if err := e.reconcileService(ctx, domain, svcName, replicas); err != nil {
+	if err := e.db.SetProcessReplicas(domain, svcName, replicas); err != nil {
 		return err
 	}
 	// New replica containers must join the site's shared networks too.

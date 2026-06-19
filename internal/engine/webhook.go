@@ -59,11 +59,18 @@ func (e *Engine) HandleWebhook(ctx context.Context, token string, body []byte, s
 
 	// Collapse rapid repeats (replay/flood) into a single deploy.
 	webhookDeployMu.Lock()
-	if now := time.Now(); now.Sub(webhookLastDeploy[wh.SiteDomain]) < webhookDeployCooldown {
+	now := time.Now()
+	if now.Sub(webhookLastDeploy[wh.SiteDomain]) < webhookDeployCooldown {
 		webhookDeployMu.Unlock()
 		return nil // acknowledged, but skipped — too soon since the last deploy
-	} else {
-		webhookLastDeploy[wh.SiteDomain] = now
+	}
+	webhookLastDeploy[wh.SiteDomain] = now
+	// Evict entries older than the cooldown window so the map can't grow without
+	// bound across many domains over time.
+	for d, t := range webhookLastDeploy {
+		if now.Sub(t) > webhookDeployCooldown {
+			delete(webhookLastDeploy, d)
+		}
 	}
 	webhookDeployMu.Unlock()
 
