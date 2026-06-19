@@ -755,7 +755,10 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) (er
 		}
 	}
 
-	if err := e.db.DeleteSite(domain); err != nil {
+	// Destroy is idempotent: if the DB row is already gone (site == nil), still
+	// clean up any orphaned containers/network/files above, but don't surface the
+	// "not found" as a fatal error — destroying nothing is a successful no-op.
+	if err := e.db.DeleteSite(domain); err != nil && site != nil {
 		return fmt.Errorf("delete site record: %w", err)
 	}
 
