@@ -54,10 +54,17 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		return fmt.Errorf("load driver: %w", err)
 	}
 
+	// Stream clone progress (keyed by the source domain, which holds the lock)
+	// so the panel shows live status like a deploy does.
+	e.beginOp(sourceDomain, "Preparing clone")
+	var cerr error
 	if driver.Type == "compose" {
-		return e.cloneCompose(ctx, source, driver, targetDomain)
+		cerr = e.cloneCompose(ctx, source, driver, targetDomain)
+	} else {
+		cerr = e.clonePhysical(ctx, source, driver, targetDomain)
 	}
-	return e.clonePhysical(ctx, source, driver, targetDomain)
+	e.finishOp(sourceDomain, "Cloned", targetDomain+" created", cerr)
+	return cerr
 }
 
 // clonePhysical implements the consistent volume-copy clone described on Clone.
@@ -80,6 +87,7 @@ func (e *Engine) clonePhysical(ctx context.Context, source *models.Site, driver 
 		e.docker.StopContainer(ctx, id)
 	}
 
+	e.emitProgress(source.Domain, "Copying files & data", "running", "", 45)
 	copyErr := copyDir(sourceRoot, targetRoot)
 	if copyErr == nil {
 		copyErr = copyDir(sourceData, targetData)

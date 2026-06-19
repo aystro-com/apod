@@ -140,6 +140,24 @@ func (e *Engine) beginDeploy(domain, step string) {
 	e.emitProgress(domain, step, "running", "", 2)
 }
 
+// beginOp starts a fresh progress stream for any long-running operation (clone,
+// destroy, backup, restore…). It's the non-deploy-specific name for the same
+// mechanism, so every operation streams live progress the way a deploy does.
+func (e *Engine) beginOp(domain, step string) {
+	e.beginDeploy(domain, step)
+}
+
+// finishOp emits the terminal progress event for an operation: 100%/"done" on
+// success, or an "error" carrying a sanitized first line of the failure. Pairs
+// with beginOp so a subscriber always sees a clean end to the stream.
+func (e *Engine) finishOp(domain, doneStep, doneDetail string, err error) {
+	if err != nil {
+		e.emitProgress(domain, "Failed", "error", sanitizeProgressLine(firstLine(err.Error())), 0)
+		return
+	}
+	e.emitProgress(domain, doneStep, "done", doneDetail, 100)
+}
+
 // emitProgress publishes a deployment step for a domain.
 func (e *Engine) emitProgress(domain, step, status, detail string, percent int) {
 	e.prog().Emit(domain, ProgressEvent{

@@ -667,7 +667,7 @@ func validateDriverParams(driver *models.Driver, params map[string]string) error
 	return nil
 }
 
-func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) error {
+func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) (err error) {
 	// Validate the domain BEFORE it is ever used to build a filesystem path.
 	// With purge=true this domain reaches os.RemoveAll; an unvalidated value
 	// like ".." could otherwise delete the data dir or escape the sandbox.
@@ -678,6 +678,12 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 		return err
 	}
 	defer e.locks.Release(domain)
+
+	// Stream teardown progress like a deploy, so the panel shows live status
+	// instead of an opaque spinner. The site record is gone by the end, but the
+	// progress buffer is retained briefly so a subscriber still sees "Destroyed".
+	e.beginOp(domain, "Destroying site")
+	defer func() { e.finishOp(domain, "Destroyed", domain+" removed", err) }()
 
 	// Deleting a site can stop the very container serving this request (the
 	// apod-ui panel deleting its own domain): the client connection drops and
@@ -701,6 +707,7 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	if site != nil {
 		driver, _ := e.drivers.Load(site.Driver)
 		if driver != nil && driver.Type == "compose" {
+			e.emitProgress(domain, "Stopping & removing containers", "running", "", 40)
 			e.DestroyComposeSite(ctx, domain, site.Owner)
 			if err := e.db.DeleteSite(domain); err != nil {
 				return fmt.Errorf("delete site record: %w", err)
@@ -721,6 +728,7 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 		return fmt.Errorf("list containers: %w", err)
 	}
 
+	e.emitProgress(domain, "Stopping & removing containers", "running", "", 40)
 	for _, id := range ids {
 		e.docker.StopContainer(ctx, id)
 		if err := e.docker.RemoveContainer(ctx, id); err != nil {
@@ -745,6 +753,7 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	e.db.RemoveSiteFromAllNetworks(domain)
 
 	if purge {
+		e.emitProgress(domain, "Deleting site data", "running", "", 80)
 		siteDir := filepath.Join(e.dataDir, "sites", domain)
 		if err := os.RemoveAll(siteDir); err != nil {
 			return fmt.Errorf("remove site data: %w", err)

@@ -80,6 +80,9 @@ func New(e *engine.Engine) *Server {
 		r.Get("/sites", h.ListSites)
 		r.Get("/sites/{domain}", h.GetSite)
 		r.Get("/sites/{domain}/deploy/events", h.DeployEvents)
+		// Generic alias: the same stream now carries any long operation's
+		// progress (clone, destroy, backup, restore…), not just deploys.
+		r.Get("/sites/{domain}/events", h.DeployEvents)
 		r.Get("/sites/{domain}/activity", h.SiteActivity)
 		r.Get("/sites/{domain}/info", h.SiteInfo)
 		r.Post("/sites/{domain}/start", h.StartSite)

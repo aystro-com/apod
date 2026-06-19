@@ -218,7 +218,14 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 		return 0, err
 	}
 	defer e.locks.Release(domain)
-	return e.createBackup(ctx, domain, storageName)
+
+	// Stream coarse progress for a user-initiated backup. (The pre-deploy
+	// snapshot calls createBackup directly and stays silent inside the deploy's
+	// own stream, so it doesn't reset the deploy's progress buffer.)
+	e.beginOp(domain, "Backing up")
+	id, err := e.createBackup(ctx, domain, storageName)
+	e.finishOp(domain, "Backup complete", fmt.Sprintf("backup #%d created", id), err)
+	return id, err
 }
 
 // createBackup performs the backup assuming the caller already holds the site
@@ -523,11 +530,16 @@ func (e *Engine) CreateSiteFromBackup(ctx context.Context, sourceDomain string, 
 	return nil
 }
 
-func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int64) error {
+func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int64) (err error) {
 	if err := e.locks.Acquire(domain, "restoring backup"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
+
+	e.beginOp(domain, "Restoring backup")
+	defer func() {
+		e.finishOp(domain, "Restored", fmt.Sprintf("backup #%d restored", backupID), err)
+	}()
 
 	backup, err := e.db.GetBackup(backupID)
 	if err != nil {
@@ -547,6 +559,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 		return err
 	}
 
+	e.emitProgress(domain, "Downloading archive", "running", "", 30)
 	var buf bytes.Buffer
 	if err := store.Download(ctx, backup.Path, &buf); err != nil {
 		return fmt.Errorf("download backup: %w", err)
@@ -576,6 +589,7 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 	}
 
 	// Stop site
+	e.emitProgress(domain, "Restoring files & database", "running", "", 60)
 	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	for _, id := range ids {
 		e.docker.StopContainer(ctx, id)
