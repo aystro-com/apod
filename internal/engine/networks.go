@@ -43,6 +43,9 @@ func (e *Engine) CreateSharedNetwork(ctx context.Context, name, owner string) er
 		return err
 	}
 	if err := e.docker.EnsureNetwork(ctx, sharedNetworkName(name)); err != nil {
+		// Roll back the record so a failed bridge doesn't leave a row that
+		// blocks re-creation.
+		e.db.DeleteSharedNetwork(name)
 		return fmt.Errorf("create network bridge: %w", err)
 	}
 	return nil
@@ -78,16 +81,23 @@ func (e *Engine) DeleteSharedNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
-// AddSiteToNetwork attaches a site's containers to a shared network.
+// AddSiteToNetwork attaches a site's containers to a shared network. The site
+// and the network must share an owner — this is the invariant that keeps a
+// shared network from bridging two different tenants (even by admin mistake).
 func (e *Engine) AddSiteToNetwork(ctx context.Context, name, domain string) error {
-	if _, ok, err := e.db.GetSharedNetwork(name); err != nil {
+	sn, ok, err := e.db.GetSharedNetwork(name)
+	if err != nil {
 		return err
-	} else if !ok {
+	}
+	if !ok {
 		return NotFound("network %q not found", name)
 	}
 	site, err := e.db.GetSite(domain)
 	if err != nil || site == nil {
 		return NotFound("site %q not found", domain)
+	}
+	if site.Owner != sn.Owner {
+		return Forbidden("site %q and network %q have different owners; a shared network cannot bridge tenants", domain, name)
 	}
 	if err := e.db.AddNetworkMember(name, domain); err != nil {
 		return err
@@ -136,7 +146,10 @@ func (e *Engine) connectSiteToNetwork(ctx context.Context, netName, domain strin
 func (e *Engine) disconnectSiteFromNetwork(ctx context.Context, netName, domain string) {
 	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	for _, id := range ids {
-		e.docker.DisconnectNetwork(ctx, netName, id) // best effort
+		if err := e.docker.DisconnectNetwork(ctx, netName, id); err != nil && !isNotConnected(err) {
+			// A failed disconnect leaves a removed site bridged — surface it.
+			log.Printf("shared net: disconnect %s from %s: %v", id, netName, err)
+		}
 	}
 }
 
@@ -149,10 +162,24 @@ func isAlreadyConnected(err error) bool {
 		strings.Contains(s, "endpoint with name")
 }
 
+// isNotConnected reports whether a disconnect error just means the container was
+// not on the network (already detached / gone — harmless).
+func isNotConnected(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "is not connected") ||
+		strings.Contains(s, "not connected to network") ||
+		strings.Contains(s, "no such container") ||
+		strings.Contains(s, "no such network")
+}
+
 // SiteNetworkView returns, for each shared network a site belongs to, the OTHER
 // members' containers and their addresses on that shared network — the data the
 // architecture view renders as reachable neighbors.
 func (e *Engine) SiteNetworkView(ctx context.Context, domain string) ([]NetworkNeighbor, error) {
+	site, err := e.db.GetSite(domain)
+	if err != nil || site == nil {
+		return nil, NotFound("site %q not found", domain)
+	}
 	nets, err := e.db.ListSiteNetworks(domain)
 	if err != nil {
 		return nil, err
@@ -163,6 +190,12 @@ func (e *Engine) SiteNetworkView(ctx context.Context, domain string) ([]NetworkN
 		members, _ := e.db.ListNetworkMembers(n)
 		for _, m := range members {
 			if m == domain {
+				continue
+			}
+			// Only ever reveal a neighbor's container names/IPs to a co-owned
+			// site — never leak one tenant's internals to another, even if a
+			// cross-owner membership somehow exists.
+			if ms, _ := e.db.GetSite(m); ms == nil || ms.Owner != site.Owner {
 				continue
 			}
 			containers, _ := e.docker.ListSiteContainers(ctx, m)

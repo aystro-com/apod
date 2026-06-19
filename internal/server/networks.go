@@ -101,6 +101,10 @@ func (h *Handler) AddNetworkMemberHandler(w http.ResponseWriter, r *http.Request
 func (h *Handler) RemoveNetworkMemberHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	domain := chi.URLParam(r, "domain")
+	if !isValidDomain(domain) {
+		respondError(w, http.StatusBadRequest, "invalid domain")
+		return
+	}
 	if !h.ownsNetwork(w, r, name) {
 		return
 	}

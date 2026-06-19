@@ -1,6 +1,10 @@
 package db
 
-import "fmt"
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+)
 
 // SharedNetwork is a named bridge that several sites are deliberately attached
 // to, so they can reach each other privately while staying isolated from
@@ -25,7 +29,7 @@ func (d *DB) CreateSharedNetwork(name, owner string) error {
 func (d *DB) GetSharedNetwork(name string) (sn SharedNetwork, ok bool, err error) {
 	row := d.conn.QueryRow(`SELECT name, owner FROM shared_networks WHERE name = ?`, name)
 	if scanErr := row.Scan(&sn.Name, &sn.Owner); scanErr != nil {
-		if scanErr.Error() == "sql: no rows in result set" {
+		if errors.Is(scanErr, sql.ErrNoRows) {
 			return SharedNetwork{}, false, nil
 		}
 		return SharedNetwork{}, false, scanErr
@@ -100,7 +104,7 @@ func (d *DB) ListNetworkMembers(network string) ([]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	out := []string{} // non-nil so it serializes as [] not null
 	for rows.Next() {
 		var s string
 		if err := rows.Scan(&s); err != nil {
