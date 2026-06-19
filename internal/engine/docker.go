@@ -92,6 +92,7 @@ type ContainerConfig struct {
 	Command     string
 	Args        []string          // raw args passed directly (not through sh -c)
 	Ports       map[string]string // container_port -> host_port
+	HostIP      string            // host interface to publish Ports on (default 127.0.0.1)
 	User        string            // UID:GID to run container as (e.g., "5001:5001")
 	PidsLimit   int64             // max processes (default 512)
 }
@@ -143,10 +144,18 @@ func (d *Docker) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 
 	portBindings := nat.PortMap{}
 	exposedPorts := nat.PortSet{}
+	// An empty HostIP makes Docker publish on 0.0.0.0 (every interface, public).
+	// Default to loopback so a published port isn't exposed to the internet
+	// unless the caller (e.g. Traefik, which fronts the site) explicitly opts in
+	// by setting HostIP to "0.0.0.0".
+	hostIP := cfg.HostIP
+	if hostIP == "" {
+		hostIP = "127.0.0.1"
+	}
 	for containerPort, hostPort := range cfg.Ports {
 		port := nat.Port(containerPort + "/tcp")
 		exposedPorts[port] = struct{}{}
-		portBindings[port] = []nat.PortBinding{{HostPort: hostPort}}
+		portBindings[port] = []nat.PortBinding{{HostIP: hostIP, HostPort: hostPort}}
 	}
 
 	hostConfig := &container.HostConfig{

@@ -188,7 +188,8 @@ func (t *Traefik) EnsureRunning(ctx context.Context) error {
 			"80":  "80",
 			"443": "443",
 		},
-		Args: traefikCommand(t.tls),
+		HostIP: "0.0.0.0", // Traefik is the public edge — publish on all interfaces
+		Args:   traefikCommand(t.tls),
 	})
 	if err != nil {
 		return fmt.Errorf("create traefik container: %w", err)
