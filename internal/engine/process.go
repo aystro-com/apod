@@ -87,11 +87,13 @@ type ProcessInfo struct {
 	Containers []ContainerRef `json:"containers"` // actual containers (name + private IP)
 }
 
-// ContainerRef identifies one running container of a service for the
-// architecture view: its name and its IP on the site's private network.
+// ContainerRef identifies one container of a service for the architecture view:
+// its name, its IP on the site's private network (empty when stopped), and
+// whether it's running.
 type ContainerRef struct {
-	Name string `json:"name"`
-	IP   string `json:"ip"`
+	Name    string `json:"name"`
+	IP      string `json:"ip"`
+	Running bool   `json:"running"`
 }
 
 // ListProcesses returns the process topology of a site: each driver service with
@@ -135,7 +137,7 @@ func (e *Engine) ListProcesses(ctx context.Context, domain string) ([]ProcessInf
 	if containers, lerr := e.docker.ListSiteContainers(ctx, domain); lerr == nil {
 		for _, c := range containers {
 			if c.Name != "" {
-				refsByService[c.Service] = append(refsByService[c.Service], ContainerRef{Name: c.Name, IP: c.IP})
+				refsByService[c.Service] = append(refsByService[c.Service], ContainerRef{Name: c.Name, IP: c.IP, Running: c.Running})
 			}
 			if c.Running {
 				runningByService[c.Service]++
@@ -224,7 +226,7 @@ func aggregateComposeProcesses(containers []SiteContainer, proxySvc string) []Pr
 			a.running++
 		}
 		if c.Name != "" {
-			a.refs = append(a.refs, ContainerRef{Name: c.Name, IP: c.IP})
+			a.refs = append(a.refs, ContainerRef{Name: c.Name, IP: c.IP, Running: c.Running})
 		}
 	}
 	sort.Strings(order)

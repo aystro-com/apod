@@ -135,10 +135,16 @@ func (e *Engine) connectSiteToNetwork(ctx context.Context, netName, domain strin
 		log.Printf("shared net: ensure %s: %v", netName, err)
 		return
 	}
-	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
-	for _, id := range ids {
-		if err := e.docker.ConnectNetwork(ctx, netName, id); err != nil && !isAlreadyConnected(err) {
-			log.Printf("shared net: connect %s -> %s: %v", id, netName, err)
+	// Only running containers can be attached — a stopped container has no
+	// network sandbox yet. Stopped ones join automatically when they start, via
+	// the reconnect hooks on StartSite/scale/update.
+	containers, _ := e.docker.ListSiteContainers(ctx, domain)
+	for _, c := range containers {
+		if c.Name == "" || !c.Running {
+			continue
+		}
+		if err := e.docker.ConnectNetwork(ctx, netName, c.Name); err != nil && !isAlreadyConnected(err) {
+			log.Printf("shared net: connect %s -> %s: %v", c.Name, netName, err)
 		}
 	}
 }
@@ -159,7 +165,11 @@ func isAlreadyConnected(err error) bool {
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "already exists in network") ||
 		strings.Contains(s, "already connected") ||
-		strings.Contains(s, "endpoint with name")
+		strings.Contains(s, "endpoint with name") ||
+		// Container stopped between listing and connecting — it has no network
+		// sandbox; it'll be attached when it starts (reconnect hooks). Benign.
+		strings.Contains(s, "network sandbox") ||
+		strings.Contains(s, "is not running")
 }
 
 // isNotConnected reports whether a disconnect error just means the container was
