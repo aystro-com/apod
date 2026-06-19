@@ -18,23 +18,24 @@ var infoCmd = &cobra.Command{
 			return err
 		}
 
-		var info struct {
-			Domain  string            `json:"domain"`
-			Driver  string            `json:"driver"`
-			URL     string            `json:"url"`
-			Secrets map[string]string `json:"secrets"`
-		}
+		// Flat map: domain/driver/url plus each credential as its own key.
+		var info map[string]string
 		json.Unmarshal(resp.Data, &info)
 
-		fmt.Printf("Domain:  %s\n", info.Domain)
-		fmt.Printf("Driver:  %s\n", info.Driver)
-		fmt.Printf("URL:     %s\n", info.URL)
+		fmt.Printf("Domain:  %s\n", info["domain"])
+		fmt.Printf("Driver:  %s\n", info["driver"])
+		fmt.Printf("URL:     %s\n", info["url"])
 
-		if len(info.Secrets) > 0 {
-			fmt.Println("\nCredentials:")
-			for k, v := range info.Secrets {
-				fmt.Printf("  %s = %s\n", k, v)
+		first := true
+		for k, v := range info {
+			if k == "domain" || k == "driver" || k == "url" {
+				continue
 			}
+			if first {
+				fmt.Println("\nCredentials:")
+				first = false
+			}
+			fmt.Printf("  %s = %s\n", k, v)
 		}
 
 		return nil

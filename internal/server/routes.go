@@ -269,7 +269,19 @@ func (h *Handler) SiteInfo(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, creds)
+	// Return a FLAT map (url + each credential as its own key) rather than a
+	// nested {secrets:{…}} object. The panel renders each field as a row, so a
+	// nested object would stringify to "[object Object]"; flattening makes every
+	// value a plain string.
+	flat := map[string]string{
+		"domain": creds.Domain,
+		"driver": creds.Driver,
+		"url":    creds.URL,
+	}
+	for k, v := range creds.Secrets {
+		flat[k] = v
+	}
+	respondJSON(w, http.StatusOK, flat)
 }
 
 func (h *Handler) ListSites(w http.ResponseWriter, r *http.Request) {
