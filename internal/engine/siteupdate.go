@@ -41,6 +41,9 @@ func (e *Engine) UpdateSite(ctx context.Context, domain string) error {
 	if err != nil {
 		return fmt.Errorf("load driver: %w", err)
 	}
+	// Expand ${variables} (e.g. ${odoo_version}) with this site's values, the
+	// same as CreateSite — otherwise we'd try to pull a literal "odoo:${...}".
+	ExpandDriverVariables(driver, e.siteVars(site))
 
 	e.beginDeploy(domain, "Update")
 	e.emitProgress(domain, "Pulling latest images", "running", "", 10)
