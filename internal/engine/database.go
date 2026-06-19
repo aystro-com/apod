@@ -27,18 +27,26 @@ func (e *Engine) DBExport(ctx context.Context, domain string) (string, error) {
 	}
 
 	dbCfg := driver.Backup.Databases[0]
-	containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
 	dbName := strings.ReplaceAll(domain, ".", "_")
 	dbUser := dbName
 
-	dumpCmd := dbDumpCmd(dbCfg.Type, dbName, dbUser, siteCreds)
+	// Compose sites don't have apod-<domain>-<service> containers and use the
+	// engine's superuser creds (their per-service creds are compose-managed), so
+	// branch exactly like the backup/import paths — otherwise export silently
+	// produces an empty/failed dump for compose-based sites (e.g. Supabase).
+	isCompose := driver.Type == "compose"
+	mode := siteCreds
+	if isCompose {
+		mode = superCreds
+	}
+	dumpCmd := dbDumpCmd(dbCfg.Type, dbName, dbUser, mode)
 	if dumpCmd == nil {
 		return "", Invalid("unsupported database type: %s", dbCfg.Type)
 	}
 
 	// Capture stdout only — stderr warnings and exec frame headers would
 	// corrupt the SQL.
-	output, err := e.docker.ExecCaptureStdout(ctx, containerName, dumpCmd)
+	output, err := e.siteCapture(ctx, domain, site.Owner, dbCfg.Service, isCompose, dumpCmd)
 	if err != nil {
 		return "", fmt.Errorf("database dump: %w", err)
 	}

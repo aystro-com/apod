@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -1892,7 +1891,11 @@ func isValidDomain(domain string) bool {
 	if len(domain) > 253 {
 		return false
 	}
-	return validDomainPattern.MatchString(strings.ToLower(domain))
+	// Match the original string (not lowercased) so this agrees with the engine's
+	// ValidateDomain, which rejects mixed/upper case to keep stored domains
+	// canonical. Otherwise the HTTP layer would accept "Example.com" only for the
+	// engine to reject it.
+	return validDomainPattern.MatchString(domain)
 }
 
 // isValidPort validates firewall port format (e.g., "22", "80/tcp", "443/udp")

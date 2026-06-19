@@ -40,6 +40,18 @@ func (e *Engine) SetConfig(ctx context.Context, domain string, key, value string
 	if err := validateConfigValue(key, value); err != nil {
 		return err
 	}
+	// The env column is writable through UpdateSiteConfig, so a config write of
+	// key="env" would otherwise bypass the key/no-newline rules SetEnv enforces.
+	// Validate the whole map here so it can't inject extra compose .env lines.
+	if key == "env" {
+		envs, err := parseEnvJSON(value)
+		if err != nil {
+			return Invalid("invalid env JSON")
+		}
+		if err := validateEnvMap(envs); err != nil {
+			return err
+		}
+	}
 
 	if err := e.locks.Acquire(domain, "updating config"); err != nil {
 		return err

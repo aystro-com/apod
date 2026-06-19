@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -61,16 +63,29 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 		if err := validateRepoEgress(site.Repo); err != nil {
 			return Invalid("repository host is not allowed: %v", err)
 		}
+		isRepo := false
+		if _, statErr := os.Stat(filepath.Join(siteRoot, ".git")); statErr == nil {
+			isRepo = true
+		}
 		fetchArgs := append(gitHardeningArgs(), "-C", siteRoot, "fetch", "origin")
 		fetchErr := exec.CommandContext(ctx, "git", fetchArgs...).Run()
+
+		if fetchErr != nil && isRepo {
+			// An existing checkout but the fetch failed (network/auth). Refuse the
+			// deploy rather than (a) resetting to a stale cached ref or (b) wiping
+			// a working tree we can't yet replace — either would be worse than
+			// surfacing the transient error.
+			e.LogActivity(domain, "deploy", "branch="+branch, "failed: git fetch error")
+			return fmt.Errorf("git fetch failed; refusing to deploy stale code: %w", fetchErr)
+		}
+
 		var resetErr error
 		if fetchErr == nil {
 			resetErr = exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "--", "origin/"+branch).Run()
 		}
-		// If the fetch failed (network/auth) or the reset failed (not a git repo
-		// yet), do a fresh clone instead of silently deploying the stale cached
-		// checkout that a reset-to-old-origin would leave behind.
-		if fetchErr != nil || resetErr != nil {
+		// Not a git repo yet (first deploy), or the reset failed (corrupt repo):
+		// do a fresh clone.
+		if !isRepo || resetErr != nil {
 			exec.CommandContext(ctx, "rm", "-rf", siteRoot).Run()
 			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--", site.Repo, siteRoot)
 			if err := exec.CommandContext(ctx, "git", args...).Run(); err != nil {

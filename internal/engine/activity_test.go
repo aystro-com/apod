@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+// validateEnvMap must reject a newline in a VALUE (not just a key) — that's the
+// actual compose .env line-injection vector, and a prior test only exercised the
+// key path so the value check could regress silently.
+func TestValidateEnvMapRejectsValueNewline(t *testing.T) {
+	if err := validateEnvMap(map[string]string{"VALID_KEY": "line1\nINJECTED=evil"}); err == nil {
+		t.Error("value with a newline should be rejected")
+	}
+	if err := validateEnvMap(map[string]string{"VALID_KEY": "carriage\rreturn"}); err == nil {
+		t.Error("value with a carriage return should be rejected")
+	}
+	if err := validateEnvMap(map[string]string{"GOOD": "fine"}); err != nil {
+		t.Errorf("clean env should pass: %v", err)
+	}
+}
+
+// DestroySite must reject an invalid domain BEFORE it can reach os.RemoveAll
+// (with purge). A regression that moved the guard would let "../.." escape.
+func TestDestroySiteRejectsBadDomainBeforeDeleting(t *testing.T) {
+	e := &Engine{locks: NewLockManager()}
+	for _, bad := range []string{"../../etc", "..", "Example.com", "a/b"} {
+		if err := e.DestroySite(t.Context(), bad, true); err == nil {
+			t.Errorf("DestroySite(%q) = nil, want validation error", bad)
+		}
+	}
+}
+
 // SiteActivity must reflect exactly what the lock manager holds, so the panel's
 // "why is it locked" banner is truthful.
 func TestSiteActivityReflectsLock(t *testing.T) {
