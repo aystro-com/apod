@@ -22,4 +22,30 @@ backup:
   paths:
     - "${site_root}"
 
+# Seed a placeholder so a brand-new static site serves a 200 (green) instead of
+# nginx's 403 for an empty document root. Uploading your own index.html replaces it.
+files:
+  - path: "${site_root}/index.html"
+    content: |
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>${site_domain}</title>
+          <style>
+            body { font-family: system-ui, sans-serif; display: grid; place-items: center;
+                   min-height: 100vh; margin: 0; background: #0b0b0c; color: #e5e7eb; }
+            .card { text-align: center; }
+            code { background: #18181b; padding: .15rem .4rem; border-radius: .35rem; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>${site_domain} is live</h1>
+            <p>Upload your files to replace this page.</p>
+          </div>
+        </body>
+      </html>
+
 setup: []
