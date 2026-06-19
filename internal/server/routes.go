@@ -183,6 +183,12 @@ func respondEngineError(w http.ResponseWriter, err error) {
 }
 
 func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
+	// Site creation is a granted capability: admins always may, other users
+	// only if an admin has given them the can_create_sites permission.
+	if user := UserFromContext(r.Context()); user != nil && user.Role != "admin" && !user.CanCreateSites {
+		respondError(w, http.StatusForbidden, "you don't have permission to create sites")
+		return
+	}
 	var req struct {
 		Domain      string            `json:"domain"`
 		Driver      string            `json:"driver"`
@@ -1727,6 +1733,24 @@ func (h *Handler) DeleteUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// SetUserPermissionsHandler (admin-only) toggles a user's site-creation
+// permission.
+func (h *Handler) SetUserPermissionsHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var req struct {
+		CanCreateSites bool `json:"can_create_sites"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.engine.SetUserCanCreateSites(r.Context(), name, req.CanCreateSites); err != nil {
+		respondEngineError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]bool{"can_create_sites": req.CanCreateSites})
 }
 
 func (h *Handler) TransferSiteHandler(w http.ResponseWriter, r *http.Request) {

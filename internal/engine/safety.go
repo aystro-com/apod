@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -29,7 +28,7 @@ func (lm *LockManager) Acquire(domain string) error {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	if lm.locks[domain] {
-		return fmt.Errorf("site %q is locked by another operation", domain)
+		return Conflict("%s is busy with another operation — try again in a moment", domain)
 	}
 	lm.locks[domain] = true
 	return nil

@@ -239,6 +239,7 @@ func New(e *engine.Engine) *Server {
 			r.Get("/users", h.ListUsersHandler)
 			r.Delete("/users/{name}", h.DeleteUserHandler)
 			r.Post("/users/{name}/reset-key", h.ResetAPIKeyHandler)
+			r.Post("/users/{name}/permissions", h.SetUserPermissionsHandler)
 
 			// Site ownership transfer
 			r.Post("/sites/{domain}/transfer", h.TransferSiteHandler)

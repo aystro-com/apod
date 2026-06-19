@@ -125,6 +125,18 @@ func (e *Engine) ListUsers(ctx context.Context) ([]models.User, error) {
 	return e.db.ListUsers()
 }
 
+// SetUserCanCreateSites grants or revokes a user's site-creation permission.
+func (e *Engine) SetUserCanCreateSites(ctx context.Context, name string, allowed bool) error {
+	user, err := e.db.GetUserByName(name)
+	if err != nil || user == nil {
+		return NotFound("user %q not found", name)
+	}
+	if user.Role == "admin" {
+		return Invalid("admins can always create sites")
+	}
+	return e.db.SetUserCanCreateSites(name, allowed)
+}
+
 func (e *Engine) ResetAPIKey(ctx context.Context, name string) (string, error) {
 	rawKey, keyHash, err := generateAPIKey()
 	if err != nil {

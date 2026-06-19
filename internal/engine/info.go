@@ -53,15 +53,35 @@ func (e *Engine) GetSiteCredentials(ctx context.Context, domain string) (*SiteCr
 				}
 			}
 		}
-	} else if driverHasDatabase(driver) {
-		// Normal site with a database — show DB name/user (password is in the
-		// container env). Stateless drivers (apod-ui, static) have no DB, so we
-		// skip these rather than show credentials for a database that doesn't
-		// exist.
-		dbName := strings.ReplaceAll(domain, ".", "_")
-		creds.Secrets["DB_NAME"] = dbName
-		creds.Secrets["DB_USER"] = dbName
-		creds.Secrets["DB_HOST"] = "apod-" + domain + "-db"
+	} else {
+		// Native site: surface the generated secrets apod stores (they're not
+		// visible anywhere else). DB identifiers when it has a database, the DB
+		// password and any per-driver secrets from the encrypted store.
+		if driverHasDatabase(driver) {
+			dbName := strings.ReplaceAll(domain, ".", "_")
+			creds.Secrets["DB_NAME"] = dbName
+			creds.Secrets["DB_USER"] = dbName
+			creds.Secrets["DB_HOST"] = "apod-" + domain + "-db"
+			if pass, ok, _ := e.getSiteSecret(domain, "db_password"); ok && pass != "" {
+				creds.Secrets["DB_PASSWORD"] = pass
+			}
+		}
+		for _, name := range generatedSecretNames {
+			if v, ok, _ := e.getSiteSecret(domain, name); ok && v != "" {
+				creds.Secrets[strings.ToUpper(name)] = v
+			}
+		}
+	}
+
+	// Driver-declared credentials (e.g. "Odoo master password") — expanded with
+	// this site's variables and shown with a friendly label.
+	if driver != nil && len(driver.Credentials) > 0 {
+		vars := e.siteVars(site)
+		for _, c := range driver.Credentials {
+			if v := expandVariables(c.Value, vars); v != "" && c.Label != "" {
+				creds.Secrets[c.Label] = v
+			}
+		}
 	}
 
 	return creds, nil

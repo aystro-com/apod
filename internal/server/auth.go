@@ -67,9 +67,10 @@ func (h *Handler) AuthMeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_, totpEnabled, _ := h.engine.GetUserTOTPStatus(user.Name)
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"name":         user.Name,
-		"role":         user.Role,
-		"totp_enabled": totpEnabled,
+		"name":             user.Name,
+		"role":             user.Role,
+		"totp_enabled":     totpEnabled,
+		"can_create_sites": user.Role == "admin" || user.CanCreateSites,
 	})
 }
 

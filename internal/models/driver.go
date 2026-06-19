@@ -74,6 +74,13 @@ type DriverFile struct {
 	Content string `yaml:"content"`
 }
 
+// DriverCredential is a labelled secret surfaced to the operator (e.g. an app's
+// admin/master password). Value is a ${variable} template expanded per site.
+type DriverCredential struct {
+	Label string `yaml:"label"`
+	Value string `yaml:"value"`
+}
+
 // DriverCompose defines a docker-compose based driver.
 // Instead of individual services, apod manages the whole compose project.
 type DriverCompose struct {
@@ -96,6 +103,7 @@ type Driver struct {
 	Services    map[string]DriverService `yaml:"services,omitempty"`
 	Compose     *DriverCompose           `yaml:"compose,omitempty"`
 	Files       []DriverFile             `yaml:"files,omitempty"`
+	Credentials []DriverCredential       `yaml:"credentials,omitempty"`
 	Healthcheck DriverHealthcheck        `yaml:"healthcheck,omitempty"`
 	Backup      DriverBackup             `yaml:"backup,omitempty"`
 	Cron        []DriverCron             `yaml:"cron,omitempty"`

@@ -21,8 +21,8 @@ func (d *DB) CreateUser(name, apiKeyHash, role string, uid int) error {
 func (d *DB) GetUserByName(name string) (*models.User, error) {
 	u := &models.User{}
 	err := d.conn.QueryRow(
-		`SELECT id, name, uid, role, created_at FROM users WHERE name = ?`, name,
-	).Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.CreatedAt)
+		`SELECT id, name, uid, role, can_create_sites, created_at FROM users WHERE name = ?`, name,
+	).Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.CanCreateSites, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user %q not found", name)
 	}
@@ -35,8 +35,8 @@ func (d *DB) GetUserByName(name string) (*models.User, error) {
 func (d *DB) GetUserByAPIKeyHash(hash string) (*models.User, error) {
 	u := &models.User{}
 	err := d.conn.QueryRow(
-		`SELECT id, name, uid, role, created_at FROM users WHERE api_key_hash = ?`, hash,
-	).Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.CreatedAt)
+		`SELECT id, name, uid, role, can_create_sites, created_at FROM users WHERE api_key_hash = ?`, hash,
+	).Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.CanCreateSites, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -48,7 +48,7 @@ func (d *DB) GetUserByAPIKeyHash(hash string) (*models.User, error) {
 
 func (d *DB) ListUsers() ([]models.User, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, name, uid, role, password_hash != '', created_at FROM users ORDER BY name`,
+		`SELECT id, name, uid, role, password_hash != '', can_create_sites, created_at FROM users ORDER BY name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query users: %w", err)
@@ -58,7 +58,7 @@ func (d *DB) ListUsers() ([]models.User, error) {
 	var users []models.User
 	for rows.Next() {
 		var u models.User
-		if err := rows.Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.HasPassword, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.UID, &u.Role, &u.HasPassword, &u.CanCreateSites, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		users = append(users, u)
@@ -92,6 +92,22 @@ func (d *DB) GetUserPasswordHash(name string) (string, error) {
 		return "", fmt.Errorf("query password hash: %w", err)
 	}
 	return hash, nil
+}
+
+// SetUserCanCreateSites grants or revokes a user's ability to provision sites.
+func (d *DB) SetUserCanCreateSites(name string, allowed bool) error {
+	v := 0
+	if allowed {
+		v = 1
+	}
+	result, err := d.conn.Exec(`UPDATE users SET can_create_sites = ? WHERE name = ?`, v, name)
+	if err != nil {
+		return fmt.Errorf("update can_create_sites: %w", err)
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return fmt.Errorf("user %q not found", name)
+	}
+	return nil
 }
 
 func (d *DB) DeleteUser(name string) error {

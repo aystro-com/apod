@@ -198,6 +198,7 @@ var migrations = []struct {
 		site_domain TEXT NOT NULL,
 		PRIMARY KEY (network, site_domain)
 	)`},
+	{32, `ALTER TABLE users ADD COLUMN can_create_sites INTEGER NOT NULL DEFAULT 0`},
 }
 
 func (d *DB) migrate() error {
