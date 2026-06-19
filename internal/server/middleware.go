@@ -215,6 +215,17 @@ func AuthMiddleware(eng *engine.Engine) func(http.Handler) http.Handler {
 // AdminOnlyMiddleware rejects non-admin users
 func AdminOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A scoped personal access token must never reach an admin route, even
+		// when its owning user is an admin: PATs are deliberately limited to
+		// read/write/deploy and may not mint credentials or change auth/system
+		// state. IsAdmin keys on the owner's role, so without this gate a scoped
+		// token owned by an admin would inherit admin access to /users, /storage,
+		// /update, /transfer, /ssh-keys, /firewall, /drivers, etc.
+		if TokenInfoFromContext(r.Context()) != nil {
+			respondError(w, http.StatusForbidden,
+				"this action requires a session or API key, not a scoped token")
+			return
+		}
 		if !IsAdmin(r.Context()) {
 			respondError(w, http.StatusForbidden, "admin access required")
 			return

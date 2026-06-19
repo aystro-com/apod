@@ -95,6 +95,29 @@ func TestPATCannotManageTokensOrAuth(t *testing.T) {
 	}
 }
 
+// Even an admin-owned scoped token must not reach admin-only routes (create
+// user, storage config, self-update, site transfer, ssh-keys, firewall): the
+// admin gate keys on token type, not just the owner's role.
+func TestPATCannotReachAdminRoutes(t *testing.T) {
+	s := newAuthTestServer(t)
+	// Token owned by root (an admin), with the broadest abilities.
+	pat := createToken(t, s, "apod_rootkey", "adminpat", []string{"read", "write", "deploy"}, true)
+
+	for _, tc := range []struct {
+		method, path, body string
+	}{
+		{"POST", "/api/v1/users", `{"name":"evil","role":"admin"}`},
+		{"POST", "/api/v1/storage", `{"name":"s","driver":"s3"}`},
+		{"POST", "/api/v1/update", ""},
+		{"POST", "/api/v1/sites/x.com/transfer", `{"owner":"bob"}`},
+		{"GET", "/api/v1/server-stats", ""},
+	} {
+		if w, _ := doJSON(t, s, tc.method, tc.path, pat, tc.body); w.Code != http.StatusForbidden {
+			t.Errorf("admin route %s %s with admin-owned PAT: got %d, want 403", tc.method, tc.path, w.Code)
+		}
+	}
+}
+
 func TestTokenListAndRevoke(t *testing.T) {
 	s := newAuthTestServer(t)
 	createToken(t, s, "apod_bobkey", "ci", []string{"read"}, false)

@@ -62,21 +62,32 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 			return Invalid("repository host is not allowed: %v", err)
 		}
 		fetchArgs := append(gitHardeningArgs(), "-C", siteRoot, "fetch", "origin")
-		exec.CommandContext(ctx, "git", fetchArgs...).Run()
-		cmd := exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "--", "origin/"+branch)
-		if err := cmd.Run(); err != nil {
-			// Maybe it's not a git repo yet, try clone
+		fetchErr := exec.CommandContext(ctx, "git", fetchArgs...).Run()
+		var resetErr error
+		if fetchErr == nil {
+			resetErr = exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "--", "origin/"+branch).Run()
+		}
+		// If the fetch failed (network/auth) or the reset failed (not a git repo
+		// yet), do a fresh clone instead of silently deploying the stale cached
+		// checkout that a reset-to-old-origin would leave behind.
+		if fetchErr != nil || resetErr != nil {
 			exec.CommandContext(ctx, "rm", "-rf", siteRoot).Run()
 			args := append(gitHardeningArgs(), "clone", "--branch", branch, "--", site.Repo, siteRoot)
-			cmd = exec.CommandContext(ctx, "git", args...)
-			if err := cmd.Run(); err != nil {
+			if err := exec.CommandContext(ctx, "git", args...).Run(); err != nil {
 				e.LogActivity(domain, "deploy", "branch="+branch, "failed: git clone error")
 				return fmt.Errorf("git clone: %w", err)
 			}
 		}
-		// Get commit hash
-		out, _ := exec.CommandContext(ctx, "git", "-C", siteRoot, "rev-parse", "HEAD").Output()
+		// Resolve the deployed commit. Refuse to record a deployment with an
+		// unknown commit — an empty hash makes a later rollback a silent no-op.
+		out, err := exec.CommandContext(ctx, "git", "-C", siteRoot, "rev-parse", "HEAD").Output()
+		if err != nil {
+			return fmt.Errorf("resolve deployed commit: %w", err)
+		}
 		commitHash = strings.TrimSpace(string(out))
+		if commitHash == "" {
+			return fmt.Errorf("resolve deployed commit: empty HEAD")
+		}
 	}
 
 	// Create deployment record
@@ -129,7 +140,12 @@ func (e *Engine) Rollback(ctx context.Context, domain string) error {
 		return NotFound("no deployment to rollback: %v", err)
 	}
 
-	site, _ := e.db.GetSite(domain)
+	// A deployment record can outlive its site (e.g. the site was destroyed);
+	// GetSite returns (nil, err) for a missing row, so check it before deref.
+	site, err := e.db.GetSite(domain)
+	if err != nil || site == nil {
+		return NotFound("site %q not found", domain)
+	}
 	siteRoot, _ := e.SiteDir(site.Owner, domain)
 
 	// Rollback git to previous commit

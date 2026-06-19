@@ -57,7 +57,9 @@ func TestValidateDomain(t *testing.T) {
 			t.Errorf("ValidateDomain(%q) = %v, want nil", d, err)
 		}
 	}
-	bad := []string{"", "../../etc", "evil`whoami`", "a||b", "foo .com", "../x"}
+	// Mixed/upper case is rejected: domains are case-insensitive, so allowing it
+	// while storing verbatim would let "Example.com" collide with "example.com".
+	bad := []string{"", "../../etc", "evil`whoami`", "a||b", "foo .com", "../x", "Example.com", "EXAMPLE.COM"}
 	for _, d := range bad {
 		if err := ValidateDomain(d); err == nil {
 			t.Errorf("ValidateDomain(%q) = nil, want error", d)

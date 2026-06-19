@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -240,22 +242,38 @@ var dangerousComposeKeys = map[string]bool{
 	"uts":                 true, // host UTS namespace
 	"runtime":             true, // alternate runtime (e.g. runc replacement)
 	"oom_kill_disable":    true,
+	"ulimits":             true, // raise rlimits (memlock, nofile, …)
+	"shm_size":            true, // oversize /dev/shm → host memory exhaustion
+	"tmpfs":               true, // unbounded tmpfs mount
+	"pids_limit":          true, // raise the per-container PID cap
+	"dns":                 true, // override resolver
+	"dns_search":          true,
+	"dns_opt":             true,
+	"extra_hosts":         true, // spoof hostnames / aid SSRF pivoting
 }
 
-// rejectDangerousComposeKeys fails if a service's raw mapping contains any
-// denylisted key, regardless of whether the typed decode would model it.
+// rejectDangerousComposeKeys fails if a service mapping contains any denylisted
+// key. It decodes the node into a generic map FIRST so YAML merge keys (`<<:`)
+// and whole-service aliases (`web: *anchor`) are resolved — a raw walk of
+// node.Content would miss keys hidden behind a merge/alias, which Docker still
+// honors at `up` time.
 func rejectDangerousComposeKeys(service string, node yaml.Node) error {
-	if node.Kind != yaml.MappingNode {
-		return nil
+	var m map[string]yaml.Node
+	if err := node.Decode(&m); err != nil {
+		return nil // not a mapping (or empty) — the typed decode reports the shape error
 	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.ToLower(strings.TrimSpace(node.Content[i].Value))
-		if dangerousComposeKeys[key] {
+	for key := range m {
+		if dangerousComposeKeys[strings.ToLower(strings.TrimSpace(key))] {
 			return fmt.Errorf("service %q: compose key %q is not allowed", service, key)
 		}
 	}
 	return nil
 }
+
+// composeServiceNameRe is the set of characters Docker Compose permits in a
+// service name. Used to keep an auto-detected/driver-supplied proxy service name
+// from breaking out of the Traefik TOML it's interpolated into.
+var composeServiceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // allowedImagePrefixes is an OPTIONAL registry/repo allowlist for tenant-
 // supplied compose images, set via APOD_ALLOWED_REGISTRIES (comma/space
@@ -717,6 +735,17 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 
 	// Write Traefik routing config
 	if proxyService != "" && proxyPort != "" {
+		// proxyService/proxyPort come from the tenant's compose (a service name)
+		// or a driver field, and are interpolated raw into the Traefik dynamic
+		// TOML below. Validate their shape so a crafted service name containing
+		// quotes/newlines can't break out of the string and inject arbitrary
+		// router/middleware config into the watched provider directory.
+		if !composeServiceNameRe.MatchString(proxyService) {
+			return Invalid("invalid proxy service name %q", proxyService)
+		}
+		if _, err := strconv.Atoi(proxyPort); err != nil {
+			return Invalid("invalid proxy port %q", proxyPort)
+		}
 		routerName := strings.ReplaceAll(opts.Domain, ".", "-")
 
 		traefikConfig := fmt.Sprintf(`[http.routers.%s]

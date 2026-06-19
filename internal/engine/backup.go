@@ -646,6 +646,12 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			rc.Close()
 			var meta backupMetadata
 			json.Unmarshal(data, &meta)
+			// The archive's env is attacker-controlled; enforce the same
+			// key/no-newline rules as SetEnv before persisting so it can't
+			// inject extra compose .env lines (same guard as the import path).
+			if err := validateEnvMap(meta.Env); err != nil {
+				return fmt.Errorf("invalid env in backup metadata: %w", err)
+			}
 			envJSON, _ := envToJSON(meta.Env)
 			e.db.UpdateSiteConfig(domain, map[string]string{"env": envJSON})
 		}

@@ -124,6 +124,11 @@ func (e *Engine) clonePhysical(ctx context.Context, source *models.Site, driver 
 	}
 
 	if envs, _ := parseEnvJSON(source.Env); len(envs) > 0 {
+		// Re-validate before persisting to the clone (a fresh persist boundary)
+		// so an env value can't inject extra compose .env lines.
+		if err := validateEnvMap(envs); err != nil {
+			return fmt.Errorf("invalid env on source site: %w", err)
+		}
 		envJSON, _ := envToJSON(envs)
 		e.db.UpdateSiteConfig(targetDomain, map[string]string{"env": envJSON})
 	}
@@ -164,6 +169,11 @@ func (e *Engine) cloneCompose(ctx context.Context, source *models.Site, driver *
 	}
 
 	if envs, _ := parseEnvJSON(source.Env); len(envs) > 0 {
+		// Re-validate before persisting to the clone (a fresh persist boundary)
+		// so an env value can't inject extra compose .env lines.
+		if err := validateEnvMap(envs); err != nil {
+			return fmt.Errorf("invalid env on source site: %w", err)
+		}
 		envJSON, _ := envToJSON(envs)
 		e.db.UpdateSiteConfig(targetDomain, map[string]string{"env": envJSON})
 	}

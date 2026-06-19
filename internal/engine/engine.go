@@ -603,6 +603,15 @@ func (e *Engine) rollbackPartialCreate(domain, owner string) {
 	os.RemoveAll(dataRoot)
 	e.db.DeleteProcessScaling(domain)
 	e.db.DeleteSiteSecrets(domain)
+	e.db.DeleteUptimeCheck(domain)
+	e.db.DeleteOperations(domain)
+	e.db.RemoveSiteFromAllNetworks(domain)
+	// Wipe any per-domain child rows too, so a failed-then-retried create (or a
+	// later site reusing the domain) doesn't inherit orphaned data — same
+	// cleanup DestroySite performs.
+	if err := e.db.DeleteSiteChildData(domain); err != nil {
+		log.Printf("rollback %s: child-data cleanup: %v", domain, err)
+	}
 	e.db.DeleteSite(domain)
 }
 

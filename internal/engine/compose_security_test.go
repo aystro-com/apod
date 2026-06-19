@@ -49,6 +49,13 @@ func TestValidateComposeSecurity(t *testing.T) {
 		"extends":               "services:\n  x:\n    image: a\n    extends:\n      service: base\n",
 		"custom seccomp":        "services:\n  x:\n    image: a\n    security_opt: [\"seccomp=/tmp/allow.json\"]\n",
 		"label disable":         "services:\n  x:\n    image: a\n    security_opt: [\"label=disable\"]\n",
+		"ulimits":               "services:\n  x:\n    image: a\n    ulimits:\n      memlock: -1\n",
+		"shm_size":              "services:\n  x:\n    image: a\n    shm_size: 8gb\n",
+		// A dangerous key hidden behind a YAML merge key must still be rejected
+		// (the validator resolves the merge, not just the literal keys).
+		"merge key cgroup_parent": "x-base: &base\n  cgroup_parent: /evil.slice\nservices:\n  web:\n    image: nginx\n    <<: *base\n",
+		// A whole service defined via a YAML alias must still be inspected.
+		"alias service": "x-svc: &svc\n  image: nginx\n  sysctls: [\"net.ipv4.ip_forward=1\"]\nservices:\n  web: *svc\n",
 	}
 	for name, c := range bad {
 		if err := validateComposeSecurity(writeCompose(t, c)); err == nil {

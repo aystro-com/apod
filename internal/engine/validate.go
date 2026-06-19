@@ -25,12 +25,16 @@ var (
 // ValidateDomain rejects domains that could escape into container names,
 // file paths, or Traefik router rules (Host()` injection).
 func ValidateDomain(domain string) error {
-	d := strings.ToLower(domain)
-	if d == "" || len(d) > 253 {
+	if domain == "" || len(domain) > 253 {
 		return Invalid("invalid domain: must be 1-253 characters")
 	}
-	if !domainPattern.MatchString(d) {
-		return Invalid("invalid domain %q: only letters, digits, hyphens and dots allowed", domain)
+	// Match the original string (not a lowercased copy). Domains are
+	// case-insensitive, so accepting mixed case but storing it verbatim would let
+	// "Example.com" and "example.com" coexist as distinct rows and overlap in
+	// Traefik routing — a cross-tenant collision / uniqueness bypass. Requiring
+	// lowercase keeps the stored value canonical.
+	if !domainPattern.MatchString(domain) {
+		return Invalid("invalid domain %q: use lowercase letters, digits, hyphens and dots", domain)
 	}
 	return nil
 }
