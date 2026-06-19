@@ -39,6 +39,35 @@ func TestProgressHubBeginClearsBuffer(t *testing.T) {
 	}
 }
 
+// Each operation's events carry a distinct run id so a subscriber can tell one
+// operation's stream from the next (and drop a replayed prior-op buffer).
+func TestProgressHubStampsRunID(t *testing.T) {
+	h := newProgressHub()
+	h.Begin("ex.com")
+	h.Emit("ex.com", ProgressEvent{Step: "Destroying", Percent: 10})
+	h.Emit("ex.com", ProgressEvent{Step: "Destroyed", Status: "done", Percent: 100})
+	first, _, cancel1 := h.Subscribe("ex.com")
+	cancel1()
+	if len(first) != 2 {
+		t.Fatalf("want 2 events, got %d", len(first))
+	}
+	run1 := first[0].Run
+	if first[1].Run != run1 {
+		t.Errorf("events within one run should share a run id: %d vs %d", first[0].Run, first[1].Run)
+	}
+
+	h.Begin("ex.com") // a new operation (re-create of the same domain)
+	h.Emit("ex.com", ProgressEvent{Step: "Preparing", Percent: 2})
+	second, _, cancel2 := h.Subscribe("ex.com")
+	defer cancel2()
+	if len(second) != 1 {
+		t.Fatalf("Begin should have cleared the prior run; got %d events", len(second))
+	}
+	if second[0].Run == run1 {
+		t.Errorf("a new run must have a new run id, still %d", run1)
+	}
+}
+
 func TestProgressHubForgetFreesMemory(t *testing.T) {
 	h := newProgressHub()
 	h.Emit("ex.com", ProgressEvent{Step: "Ready", Status: "done", Percent: 100})

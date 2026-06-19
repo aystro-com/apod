@@ -12,6 +12,7 @@ type ProgressEvent struct {
 	Status  string    `json:"status"`           // "running" | "done" | "error"
 	Detail  string    `json:"detail,omitempty"` // optional line of detail (a service, an image, …)
 	Percent int       `json:"percent"`          // overall completion, 0-100
+	Run     uint64    `json:"run"`              // per-domain operation id; bumps each Begin
 	Time    time.Time `json:"time"`
 }
 
@@ -66,6 +67,11 @@ func (h *progressHub) Emit(domain string, ev ProgressEvent) {
 	}
 
 	h.mu.Lock()
+	// Stamp the event with the current operation's run id. Subscribers use this
+	// to tell one operation's events from the next, so a retained buffer from a
+	// just-finished op (e.g. a destroy) can't bleed into the next op's stream
+	// (e.g. a re-create of the same domain) and pin its progress bar.
+	ev.Run = h.gen[domain]
 	buf := append(h.buffers[domain], ev)
 	if len(buf) > 200 { // bound memory for pathological cases
 		buf = buf[len(buf)-200:]
