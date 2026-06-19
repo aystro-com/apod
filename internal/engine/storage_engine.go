@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/aystro/apod/internal/storage"
 )
 
 // Backup schedule operations
@@ -55,13 +57,32 @@ func (e *Engine) RemoveBackupSchedule(ctx context.Context, scheduleID int64, dom
 // Storage config operations
 
 func (e *Engine) AddStorageConfig(name, driver, configJSON string) error {
+	// Validate the driver config up front so a misconfiguration (unknown driver,
+	// bad endpoint scheme, missing SFTP host key, …) is rejected with a clear 400
+	// when the admin adds it — instead of silently failing at backup time. New()
+	// only parses and validates the config; it makes no network calls.
+	var cfg map[string]string
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return Invalid("invalid storage config: %v", err)
+	}
+	if _, err := storage.New(driver, cfg); err != nil {
+		return Invalid("%v", err)
+	}
+
 	// The config blob holds cloud/SFTP credentials — encrypt it at rest so a
 	// leaked DB file doesn't expose them.
 	enc, err := e.encryptSecretValue(configJSON)
 	if err != nil {
 		return err
 	}
-	return e.db.CreateStorageConfig(name, driver, enc)
+	if err := e.db.CreateStorageConfig(name, driver, enc); err != nil {
+		// A duplicate name is a client conflict (409), not a server error.
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			return Conflict("storage config %q already exists", name)
+		}
+		return err
+	}
+	return nil
 }
 
 // secretConfigKeys are storage-config fields that must never be returned to a

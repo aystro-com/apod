@@ -694,7 +694,9 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 	// SYS_ADMIN/ALL caps, docker-socket mounts) that would allow a malicious
 	// driver or repo to escape the container to host root.
 	if err := validateComposeSecurity(composeFile); err != nil {
-		return fmt.Errorf("compose security check: %w", err)
+		// These are all bad-input failures (a compose file requesting a host
+		// escape) — surface them as a clear 400 instead of an opaque 500.
+		return WrapInvalid(err, "compose security check")
 	}
 	e.emitProgress(opts.Domain, "Validating configuration", "running", "", 30)
 
