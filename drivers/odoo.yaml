@@ -36,6 +36,22 @@ services:
     volumes:
       - "${data_root}/postgres:/var/lib/postgresql/data/pgdata"
 
+# Generate odoo.conf before the container starts. The odoo entrypoint (and its
+# wait-for-psql.py) read the DB connection from the [options] section of
+# /etc/odoo/odoo.conf; without this file odoo crash-loops with
+# "configparser.NoSectionError: No section: 'options'".
+files:
+  - path: "${data_root}/odoo/config/odoo.conf"
+    content: |
+      [options]
+      admin_passwd = ${site_db_pass}
+      db_host = apod-${site_domain}-db
+      db_port = 5432
+      db_user = ${site_db_user}
+      db_password = ${site_db_pass}
+      addons_path = /mnt/extra-addons
+      data_dir = /var/lib/odoo
+
 healthcheck:
   url: "http://localhost:8069"
   interval: 15s
