@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -56,8 +57,27 @@ func (d *Docker) PullImage(ctx context.Context, ref string) error {
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	defer reader.Close()
-	_, err = io.Copy(io.Discard, reader)
-	return err
+	// Docker reports pull-time failures (auth, manifest unknown, layer download)
+	// as JSON messages INSIDE the stream — ImagePull's return is nil. Parse the
+	// stream so a failed pull doesn't silently look successful (and run a stale
+	// local image).
+	dec := json.NewDecoder(reader)
+	for {
+		var msg struct {
+			Error string `json:"error"`
+		}
+		if derr := dec.Decode(&msg); derr != nil {
+			if derr == io.EOF {
+				break
+			}
+			io.Copy(io.Discard, reader) // non-JSON tail; drain and stop
+			break
+		}
+		if msg.Error != "" {
+			return fmt.Errorf("pull image %s: %s", ref, msg.Error)
+		}
+	}
+	return nil
 }
 
 type ContainerConfig struct {
@@ -445,11 +465,14 @@ func (d *Docker) execCapture(ctx context.Context, containerID string, cmd []stri
 	}
 
 	// The stream has drained, so the command has finished; recover its exit code.
+	// If the inspect fails we must NOT assume success (exit 0) — a caller gating
+	// on the exit code would then treat a command of unknown status as OK and,
+	// e.g., store a truncated DB dump.
 	inspect, ierr := d.cli.ContainerExecInspect(ctx, exec.ID)
-	if ierr == nil {
-		exitCode = inspect.ExitCode
+	if ierr != nil {
+		return outBuf.Bytes(), errBuf.Bytes(), -1, fmt.Errorf("inspect exec: %w", ierr)
 	}
-	return outBuf.Bytes(), errBuf.Bytes(), exitCode, nil
+	return outBuf.Bytes(), errBuf.Bytes(), inspect.ExitCode, nil
 }
 
 // ExecWithInput runs cmd with input streamed to its stdin, returning combined
@@ -492,7 +515,13 @@ func (d *Docker) ExecWithInput(ctx context.Context, containerID string, cmd []st
 	}
 
 	out := outBuf.String() + errBuf.String()
-	if inspect, ierr := d.cli.ContainerExecInspect(ctx, exec.ID); ierr == nil && inspect.ExitCode != 0 {
+	inspect, ierr := d.cli.ContainerExecInspect(ctx, exec.ID)
+	if ierr != nil {
+		// Don't report success on an unknown exit status (e.g. a DB restore whose
+		// result we can't confirm).
+		return out, fmt.Errorf("inspect exec: %w", ierr)
+	}
+	if inspect.ExitCode != 0 {
 		return out, fmt.Errorf("command exited %d: %s", inspect.ExitCode, strings.TrimSpace(out))
 	}
 	return out, nil

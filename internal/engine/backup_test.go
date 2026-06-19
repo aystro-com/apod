@@ -1,6 +1,10 @@
 package engine
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestDurationToCron(t *testing.T) {
 	tests := []struct {
@@ -75,5 +79,24 @@ func TestDbRestoreCommand(t *testing.T) {
 		if !tt.notNil && cmd != nil {
 			t.Errorf("dbRestoreCmd(%q) should return nil", tt.dbType)
 		}
+	}
+}
+
+func TestSymlinkedParentWithin(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	// A normal nested path under root has no symlinked parent.
+	if symlinkedParentWithin(root, filepath.Join(root, "a", "b", "file")) {
+		t.Error("clean nested path falsely flagged as symlinked")
+	}
+
+	// Plant a symlink inside root pointing outside it (the SFTP-planted threat).
+	link := filepath.Join(root, "evil")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if !symlinkedParentWithin(root, filepath.Join(link, "passwd")) {
+		t.Error("write through a symlinked parent was not detected")
 	}
 }

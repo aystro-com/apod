@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aystro/apod/internal/db"
@@ -27,7 +28,15 @@ const maxRestoreTotalBytes = 20 << 30 // 20 GiB
 // symlink such as Laravel's public/storage) so the write does not fail — that
 // failure was previously misreported as a decompression bomb. Returns bytes
 // written.
-func restoreZipEntry(f *zip.File, destPath string, limit int64) (int64, error) {
+func restoreZipEntry(f *zip.File, root, destPath string, limit int64) (int64, error) {
+	// A lexical prefix check (done by callers) blocks "../" names but NOT a
+	// symlinked parent directory — os.MkdirAll/os.OpenFile would follow a symlink
+	// planted earlier (e.g. via the tenant's SFTP access) out of the site root.
+	// Refuse to write through any symlinked parent, and open the final file with
+	// O_NOFOLLOW so a symlink at the destination itself isn't followed.
+	if symlinkedParentWithin(root, destPath) {
+		return 0, fmt.Errorf("refusing %s: a parent directory is a symlink", destPath)
+	}
 	rc, err := f.Open()
 	if err != nil {
 		return 0, fmt.Errorf("open entry: %w", err)
@@ -39,12 +48,31 @@ func restoreZipEntry(f *zip.File, destPath string, limit int64) (int64, error) {
 	if fi, lerr := os.Lstat(destPath); lerr == nil && !fi.Mode().IsRegular() {
 		os.RemoveAll(destPath)
 	}
-	dest, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	dest, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
 	if err != nil {
 		return 0, fmt.Errorf("create %s: %w", destPath, err)
 	}
 	defer dest.Close()
 	return io.Copy(dest, io.LimitReader(rc, limit))
+}
+
+// symlinkedParentWithin reports whether any directory component of destPath
+// between root (exclusive) and the file (exclusive) is a symlink — i.e. a write
+// to destPath would be redirected through a symlink out of root.
+func symlinkedParentWithin(root, destPath string) bool {
+	root = filepath.Clean(root)
+	cur := filepath.Dir(filepath.Clean(destPath))
+	for len(cur) > len(root) {
+		if fi, err := os.Lstat(cur); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur { // reached filesystem root
+			break
+		}
+		cur = parent
+	}
+	return false
 }
 
 // readDumpFromZip returns the decompressed logical dump for a database service
@@ -599,6 +627,18 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 
 	// Guard against decompression bombs: cap total bytes written during restore.
 	var written int64
+	// Track restore failures so a partial restore is reported as a failure rather
+	// than silent success — the site has already been overwritten, so we finish
+	// the steps we can but surface the error to the caller.
+	var restoreErrs int
+	var firstErr string
+	recordErr := func(name string, err error) {
+		restoreErrs++
+		if firstErr == "" {
+			firstErr = fmt.Sprintf("%s: %v", name, err)
+		}
+		e.LogActivity(domain, "restore_warning", fmt.Sprintf("%s: %v", name, err), "warning")
+	}
 	for _, f := range zr.File {
 		// Restore site files
 		if strings.HasPrefix(f.Name, "files/") {
@@ -610,15 +650,13 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(siteRoot)+string(filepath.Separator)) {
 				continue
 			}
-			n, err := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
+			n, err := restoreZipEntry(f, siteRoot, destPath, maxRestoreTotalBytes-written+1)
 			written += n
 			if written > maxRestoreTotalBytes {
 				return fmt.Errorf("restore aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
 			}
 			if err != nil {
-				// Don't abort the whole restore (the site is already stopped) for
-				// one bad entry — record it and carry on.
-				e.LogActivity(domain, "restore_warning", fmt.Sprintf("%s: %v", f.Name, err), "warning")
+				recordErr(f.Name, err)
 			}
 		}
 		// Restore data directory (volumes)
@@ -631,13 +669,13 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(dataRoot)+string(filepath.Separator)) {
 				continue
 			}
-			n, err := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
+			n, err := restoreZipEntry(f, dataRoot, destPath, maxRestoreTotalBytes-written+1)
 			written += n
 			if written > maxRestoreTotalBytes {
 				return fmt.Errorf("restore aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
 			}
 			if err != nil {
-				e.LogActivity(domain, "restore_warning", fmt.Sprintf("%s: %v", f.Name, err), "warning")
+				recordErr(f.Name, err)
 			}
 		}
 		if f.Name == "metadata.json" {
@@ -689,12 +727,15 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 				continue
 			}
 			if err := e.restoreDatabase(ctx, domain, site.Owner, dbCfg.Service, dbCfg.Type, dbName, dbName, isCompose, dump); err != nil {
-				e.LogActivity(domain, "restore_warning", fmt.Sprintf("db %s: %v", dbCfg.Service, err), "warning")
+				recordErr("db "+dbCfg.Service, err)
 			}
 		}
 	}
 
 	e.db.UpdateSiteStatus(domain, "running")
+	if restoreErrs > 0 {
+		return fmt.Errorf("restore completed with %d error(s); first: %s", restoreErrs, firstErr)
+	}
 	return nil
 }
 

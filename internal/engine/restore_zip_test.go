@@ -36,7 +36,7 @@ func TestRestoreZipEntryHonorsLimit(t *testing.T) {
 	zr := zipWithEntry(t, "files/big.bin", bytes.Repeat([]byte("A"), 10_000))
 	dest := filepath.Join(t.TempDir(), "out.bin")
 
-	n, err := restoreZipEntry(zr.File[0], dest, 100)
+	n, err := restoreZipEntry(zr.File[0], filepath.Dir(dest), dest, 100)
 	if err != nil {
 		t.Fatalf("restoreZipEntry: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRestoreZipEntryWritesWholeEntryUnderLimit(t *testing.T) {
 	zr := zipWithEntry(t, "files/small.txt", content)
 	dest := filepath.Join(t.TempDir(), "small.txt")
 
-	n, err := restoreZipEntry(zr.File[0], dest, 1<<20)
+	n, err := restoreZipEntry(zr.File[0], filepath.Dir(dest), dest, 1<<20)
 	if err != nil {
 		t.Fatalf("restoreZipEntry: %v", err)
 	}

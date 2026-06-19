@@ -353,7 +353,7 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(siteRoot)+string(filepath.Separator)) {
 				continue
 			}
-			n, _ := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
+			n, _ := restoreZipEntry(f, siteRoot, destPath, maxRestoreTotalBytes-written+1)
 			written += n
 			if written > maxRestoreTotalBytes {
 				return Invalid("import aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
@@ -376,7 +376,7 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 			if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(dataRoot)+string(filepath.Separator)) {
 				continue
 			}
-			n, _ := restoreZipEntry(f, destPath, maxRestoreTotalBytes-written+1)
+			n, _ := restoreZipEntry(f, dataRoot, destPath, maxRestoreTotalBytes-written+1)
 			written += n
 			if written > maxRestoreTotalBytes {
 				return Invalid("import aborted: archive exceeds %d bytes (possible decompression bomb)", maxRestoreTotalBytes)
