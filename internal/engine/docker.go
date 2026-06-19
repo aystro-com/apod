@@ -246,6 +246,7 @@ type SiteContainer struct {
 	Service string
 	Image   string
 	Running bool
+	IP      string // IPv4 on the site's private network
 }
 
 // ListSiteContainers returns every container labelled for the given site.
@@ -256,6 +257,7 @@ func (d *Docker) ListSiteContainers(ctx context.Context, domain string) ([]SiteC
 	if err != nil {
 		return nil, err
 	}
+	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
 	out := make([]SiteContainer, 0, len(containers))
 	for _, c := range containers {
 		name := ""
@@ -267,9 +269,27 @@ func (d *Docker) ListSiteContainers(ctx context.Context, domain string) ([]SiteC
 			Service: c.Labels[labelPrefix+"service"],
 			Image:   c.Image,
 			Running: c.State == "running",
+			IP:      containerSiteIP(c, siteNetwork),
 		})
 	}
 	return out, nil
+}
+
+// containerSiteIP returns the container's IPv4 on its private site network,
+// falling back to any attached network's address.
+func containerSiteIP(c container.Summary, siteNetwork string) string {
+	if c.NetworkSettings == nil {
+		return ""
+	}
+	if ep, ok := c.NetworkSettings.Networks[siteNetwork]; ok && ep != nil && ep.IPAddress != "" {
+		return ep.IPAddress
+	}
+	for _, ep := range c.NetworkSettings.Networks {
+		if ep != nil && ep.IPAddress != "" {
+			return ep.IPAddress
+		}
+	}
+	return ""
 }
 
 // InspectReplica reconstructs a ContainerConfig from an existing container so a
