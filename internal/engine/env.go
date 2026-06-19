@@ -65,7 +65,7 @@ func (e *Engine) SetEnv(ctx context.Context, domain, key, value string) error {
 		return Invalid("environment values must not contain newlines")
 	}
 
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "updating environment"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
@@ -84,7 +84,7 @@ func (e *Engine) SetEnv(ctx context.Context, domain, key, value string) error {
 }
 
 func (e *Engine) UnsetEnv(ctx context.Context, domain, key string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "updating environment"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)

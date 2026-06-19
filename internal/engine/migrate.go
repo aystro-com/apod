@@ -17,7 +17,7 @@ import (
 // ExportSite creates a self-contained backup zip for migration.
 // Returns the path to the export file.
 func (e *Engine) ExportSite(ctx context.Context, domain, outputDir, passphrase string) (string, error) {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "exporting"); err != nil {
 		return "", err
 	}
 	defer e.locks.Release(domain)

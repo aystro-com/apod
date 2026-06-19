@@ -278,7 +278,7 @@ func (e *Engine) serviceContainers(ctx context.Context, domain, svcName string) 
 // existing one so they share the same image, env (including generated secrets),
 // command, and limits. Only worker-role services can be scaled.
 func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, replicas int) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "scaling"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
@@ -364,7 +364,7 @@ func (e *Engine) reconcileService(ctx context.Context, domain, svcName string, d
 
 // RestartProcess restarts every container of a service (all replicas).
 func (e *Engine) RestartProcess(ctx context.Context, domain, svcName string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "restarting"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)

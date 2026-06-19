@@ -33,7 +33,7 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		return fmt.Errorf("source and target domain must be different")
 	}
 
-	if err := e.locks.Acquire(sourceDomain); err != nil {
+	if err := e.locks.Acquire(sourceDomain, "cloning"); err != nil {
 		return err
 	}
 	defer e.locks.Release(sourceDomain)

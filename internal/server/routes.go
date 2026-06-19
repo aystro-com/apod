@@ -345,6 +345,17 @@ func (h *Handler) GetSite(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, site)
 }
 
+// SiteActivity reports what operation currently holds the site's lock, so the
+// panel can show a live "Busy: deploying (2m)" indicator and explain why an
+// action returned "site is busy".
+func (h *Handler) SiteActivity(w http.ResponseWriter, r *http.Request) {
+	domain := chi.URLParam(r, "domain")
+	if !h.checkSiteAccess(w, r, domain) {
+		return
+	}
+	respondJSON(w, http.StatusOK, h.engine.SiteActivity(domain))
+}
+
 func (h *Handler) StartSite(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
 	if !h.checkSiteAccess(w, r, domain) {

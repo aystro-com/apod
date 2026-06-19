@@ -19,7 +19,7 @@ import (
 // pulled and its containers recreated in place, preserving name, labels, env
 // (and the secrets baked into it), mounts, and resource limits.
 func (e *Engine) UpdateSite(ctx context.Context, domain string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "updating"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)

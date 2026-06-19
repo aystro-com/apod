@@ -1,21 +1,38 @@
 package engine
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLockManager(t *testing.T) {
 	lm := NewLockManager()
 
-	if err := lm.Acquire("example.com"); err != nil {
+	if err := lm.Acquire("example.com", "deploying"); err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
 
-	if err := lm.Acquire("example.com"); err == nil {
+	// The held lock reports what it's busy with.
+	if info := lm.Info("example.com"); !info.Held || info.Operation != "deploying" {
+		t.Fatalf("Info() = %+v, want held=true operation=deploying", info)
+	}
+
+	err := lm.Acquire("example.com", "restarting")
+	if err == nil {
 		t.Fatal("expected error on double acquire")
+	}
+	// The conflict message names the operation already in progress.
+	if !strings.Contains(err.Error(), "deploying") {
+		t.Errorf("conflict error %q should mention the holding operation", err)
 	}
 
 	lm.Release("example.com")
 
-	if err := lm.Acquire("example.com"); err != nil {
+	if info := lm.Info("example.com"); info.Held {
+		t.Fatalf("Info() after release = %+v, want held=false", info)
+	}
+
+	if err := lm.Acquire("example.com", "deploying"); err != nil {
 		t.Fatalf("acquire after release: %v", err)
 	}
 }

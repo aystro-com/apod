@@ -21,7 +21,7 @@ func (e *Engine) AddDomain(ctx context.Context, siteDomain, newDomain string) er
 		return err
 	}
 
-	if err := e.locks.Acquire(siteDomain); err != nil {
+	if err := e.locks.Acquire(siteDomain, "updating domains"); err != nil {
 		return err
 	}
 	defer e.locks.Release(siteDomain)
@@ -48,7 +48,7 @@ func (e *Engine) AddDomain(ctx context.Context, siteDomain, newDomain string) er
 }
 
 func (e *Engine) RemoveDomain(ctx context.Context, siteDomain, removeDomain string) error {
-	if err := e.locks.Acquire(siteDomain); err != nil {
+	if err := e.locks.Acquire(siteDomain, "updating domains"); err != nil {
 		return err
 	}
 	defer e.locks.Release(siteDomain)

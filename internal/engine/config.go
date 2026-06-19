@@ -41,7 +41,7 @@ func (e *Engine) SetConfig(ctx context.Context, domain string, key, value string
 		return err
 	}
 
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "updating config"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)

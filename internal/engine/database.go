@@ -7,7 +7,7 @@ import (
 )
 
 func (e *Engine) DBExport(ctx context.Context, domain string) (string, error) {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "exporting database"); err != nil {
 		return "", err
 	}
 	defer e.locks.Release(domain)
@@ -48,7 +48,7 @@ func (e *Engine) DBExport(ctx context.Context, domain string) (string, error) {
 }
 
 func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "importing database"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)

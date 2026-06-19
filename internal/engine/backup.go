@@ -210,12 +210,21 @@ func dirHasContent(path string) bool {
 	return err == nil && len(entries) > 0
 }
 
+// CreateBackup takes the site lock for the duration of the backup. Callers that
+// already hold the lock (e.g. a deploy taking its pre-deploy snapshot) must use
+// createBackup instead to avoid double-acquiring a non-reentrant lock.
 func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (int64, error) {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "backing up"); err != nil {
 		return 0, err
 	}
 	defer e.locks.Release(domain)
+	return e.createBackup(ctx, domain, storageName)
+}
 
+// createBackup performs the backup assuming the caller already holds the site
+// lock. It is the shared implementation behind CreateBackup and the pre-deploy
+// snapshot.
+func (e *Engine) createBackup(ctx context.Context, domain, storageName string) (int64, error) {
 	site, err := e.db.GetSite(domain)
 	if err != nil {
 		return 0, fmt.Errorf("get site: %w", err)
@@ -515,7 +524,7 @@ func (e *Engine) CreateSiteFromBackup(ctx context.Context, sourceDomain string, 
 }
 
 func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int64) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "restoring backup"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)

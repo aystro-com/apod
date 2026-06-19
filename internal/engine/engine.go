@@ -177,7 +177,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		return err
 	}
 
-	if err := e.locks.Acquire(opts.Domain); err != nil {
+	if err := e.locks.Acquire(opts.Domain, "provisioning"); err != nil {
 		return err
 	}
 	defer e.locks.Release(opts.Domain)
@@ -674,7 +674,7 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	if err := ValidateDomain(domain); err != nil {
 		return err
 	}
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "destroying"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
@@ -755,7 +755,7 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 }
 
 func (e *Engine) StartSite(ctx context.Context, domain string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "starting"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
@@ -794,7 +794,7 @@ func (e *Engine) StartSite(ctx context.Context, domain string) error {
 }
 
 func (e *Engine) StopSite(ctx context.Context, domain string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "stopping"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)

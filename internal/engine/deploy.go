@@ -8,7 +8,7 @@ import (
 )
 
 func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "deploying"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
@@ -39,16 +39,15 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 	// this site's values, so hooks can reference the domain, db creds and paths.
 	ExpandDriverVariables(driver, e.siteVars(site))
 
-	// Auto-backup before deploy (non-blocking — log warning on failure)
-	e.locks.Release(domain) // release lock temporarily for backup
-	backupID, err := e.CreateBackup(ctx, domain, "")
+	// Auto-backup before deploy (non-blocking — log warning on failure). Use the
+	// already-locked variant: the deploy holds the lock for its whole duration so
+	// nothing else can interleave. (The previous release/re-acquire dance could
+	// hand the lock to another operation mid-deploy and then release *its* lock.)
+	backupID, err := e.createBackup(ctx, domain, "")
 	if err != nil {
 		e.LogActivity(domain, "deploy_backup", fmt.Sprintf("pre-deploy backup failed: %v", err), "warning")
 	} else {
 		e.LogActivity(domain, "deploy_backup", fmt.Sprintf("pre-deploy backup #%d created", backupID), "success")
-	}
-	if err := e.locks.Acquire(domain); err != nil {
-		return err
 	}
 
 	// Record deployment
@@ -120,7 +119,7 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 }
 
 func (e *Engine) Rollback(ctx context.Context, domain string) error {
-	if err := e.locks.Acquire(domain); err != nil {
+	if err := e.locks.Acquire(domain, "rolling back"); err != nil {
 		return err
 	}
 	defer e.locks.Release(domain)
