@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aystro/apod/internal/models"
 	"github.com/docker/docker/api/types/container"
 )
 
@@ -165,8 +166,16 @@ func pruneCPUSamples() {
 	cpuSamplesMu.Unlock()
 }
 
-func (e *Engine) GetAllStats(ctx context.Context) ([]SiteStats, error) {
-	sites, err := e.db.ListSites()
+// GetAllStats returns live stats for sites. A non-empty owner restricts the
+// result to that owner's sites; an empty owner (admin) returns all.
+func (e *Engine) GetAllStats(ctx context.Context, owner string) ([]SiteStats, error) {
+	var sites []models.Site
+	var err error
+	if owner == "" {
+		sites, err = e.db.ListSites()
+	} else {
+		sites, err = e.db.ListSitesByOwner(owner)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -56,6 +57,22 @@ func (d *DB) ListAllOperations(limit int) ([]Operation, error) {
 	rows, err := d.conn.Query(
 		`SELECT id, site_domain, action, details, result, created_at FROM operations ORDER BY created_at DESC LIMIT ?`, limit,
 	)
+	return scanOperations(rows, err)
+}
+
+// ListOperationsByOwner returns activity only for sites owned by owner, by
+// joining against the sites table — so a non-admin never sees other tenants'
+// activity.
+func (d *DB) ListOperationsByOwner(owner string, limit int) ([]Operation, error) {
+	rows, err := d.conn.Query(
+		`SELECT o.id, o.site_domain, o.action, o.details, o.result, o.created_at
+		   FROM operations o JOIN sites s ON s.domain = o.site_domain
+		  WHERE s.owner = ? ORDER BY o.created_at DESC LIMIT ?`, owner, limit,
+	)
+	return scanOperations(rows, err)
+}
+
+func scanOperations(rows *sql.Rows, err error) ([]Operation, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -68,5 +85,5 @@ func (d *DB) ListAllOperations(limit int) ([]Operation, error) {
 		}
 		ops = append(ops, op)
 	}
-	return ops, nil
+	return ops, rows.Err()
 }

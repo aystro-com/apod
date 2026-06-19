@@ -13,9 +13,14 @@ func (e *Engine) GetLogs(ctx context.Context, domain string, limit int) (interfa
 	return e.db.ListOperations(domain, limit)
 }
 
-func (e *Engine) GetAllLogs(ctx context.Context, limit int) (interface{}, error) {
+// GetAllLogs returns recent activity. A non-empty owner restricts it to that
+// owner's sites; an empty owner (admin) returns everything.
+func (e *Engine) GetAllLogs(ctx context.Context, owner string, limit int) (interface{}, error) {
 	if limit == 0 {
 		limit = 50
 	}
-	return e.db.ListAllOperations(limit)
+	if owner == "" {
+		return e.db.ListAllOperations(limit)
+	}
+	return e.db.ListOperationsByOwner(owner, limit)
 }

@@ -211,6 +211,13 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		site.CPU = "1"
 	}
 
+	// Reject a domain already used as another site's alias. The sites.domain
+	// UNIQUE only covers primary domains; aliases live in the domains table, so
+	// without this a new site could claim an existing alias and fail half-way.
+	if existing, _ := e.db.GetSiteByDomain(opts.Domain); existing != nil && existing.Domain != opts.Domain {
+		return Conflict("domain %q is already in use by site %q", opts.Domain, existing.Domain)
+	}
+
 	if err := e.db.CreateSite(site); err != nil {
 		// If domain exists from a failed previous create, clean it up and retry
 		if existing, _ := e.db.GetSite(opts.Domain); existing != nil {

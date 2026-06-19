@@ -30,6 +30,15 @@ func (e *Engine) AddDomain(ctx context.Context, siteDomain, newDomain string) er
 	if err != nil {
 		return fmt.Errorf("get site: %w", err)
 	}
+	if site == nil {
+		return NotFound("site %q not found", siteDomain)
+	}
+
+	// Reject a domain already used by any site (its primary domain or an alias)
+	// with a clear conflict instead of an opaque UNIQUE-constraint 500.
+	if existing, _ := e.db.GetSiteByDomain(newDomain); existing != nil {
+		return Conflict("domain %q is already in use by site %q", newDomain, existing.Domain)
+	}
 
 	if err := e.db.AddDomain(site.ID, newDomain, false); err != nil {
 		return fmt.Errorf("add domain: %w", err)

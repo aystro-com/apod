@@ -1197,7 +1197,12 @@ func (h *Handler) MonitorSiteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) MonitorAllHandler(w http.ResponseWriter, r *http.Request) {
-	stats, err := h.engine.GetAllStats(r.Context())
+	// Non-admins only see their own sites' stats — never other tenants'.
+	owner := ""
+	if user := UserFromContext(r.Context()); user != nil && user.Role != "admin" {
+		owner = user.Name
+	}
+	stats, err := h.engine.GetAllStats(r.Context(), owner)
 	if err != nil {
 		respondEngineError(w, err)
 		return
@@ -1299,7 +1304,12 @@ func (h *Handler) SiteLogsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AllLogsHandler(w http.ResponseWriter, r *http.Request) {
-	logs, err := h.engine.GetAllLogs(r.Context(), 100)
+	// Non-admins only see activity for their own sites.
+	owner := ""
+	if user := UserFromContext(r.Context()); user != nil && user.Role != "admin" {
+		owner = user.Name
+	}
+	logs, err := h.engine.GetAllLogs(r.Context(), owner, 100)
 	if err != nil {
 		respondEngineError(w, err)
 		return
