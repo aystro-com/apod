@@ -247,6 +247,20 @@ func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, pass
 		return fmt.Errorf("export file has no metadata — not a valid apod export")
 	}
 
+	// meta.Domain is fully attacker-controlled (it comes from the uploaded
+	// archive) and is used to derive the database name/user, which flow into
+	// `sh -c` mysql/psql commands. Validate it unconditionally here — not just
+	// the effective `domain` below, which may instead come from newDomain — so a
+	// crafted metadata domain like "x$(touch /tmp/pwn)" can never reach a shell.
+	if err := ValidateDomain(meta.Domain); err != nil {
+		return fmt.Errorf("invalid domain in export metadata: %w", err)
+	}
+	// Env from the archive is persisted directly; enforce the same key/no-newline
+	// rules SetEnv uses so it can't inject extra compose .env lines.
+	if err := validateEnvMap(meta.Env); err != nil {
+		return fmt.Errorf("invalid env in export metadata: %w", err)
+	}
+
 	domain := newDomain
 	if domain == "" {
 		domain = meta.Domain

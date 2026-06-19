@@ -995,7 +995,17 @@ func (h *Handler) ExportSiteHandler(w http.ResponseWriter, r *http.Request) {
 		OutputDir  string `json:"output_dir"`
 		Passphrase string `json:"passphrase"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// output_dir is an arbitrary server-side path. Only admins may direct the
+	// export anywhere; for everyone else the engine's default location is used,
+	// so a non-admin owner can't write the archive into another tenant's tree or
+	// a sensitive system directory.
+	if user := UserFromContext(r.Context()); user == nil || user.Role != "admin" {
+		req.OutputDir = ""
+	}
 	path, err := h.engine.ExportSite(r.Context(), domain, req.OutputDir, req.Passphrase)
 	if err != nil {
 		respondEngineError(w, err)

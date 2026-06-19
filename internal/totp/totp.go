@@ -38,6 +38,11 @@ func URI(secret, account, issuer string) string {
 	)
 }
 
+// Step returns the time-step counter for t. The highest step Verify will accept
+// at time t is Step(t)+1, so callers can advance their anti-replay floor to that
+// value and reject every code still inside the drift window.
+func Step(t time.Time) uint64 { return uint64(t.Unix()) / stepSeconds }
+
 // Code computes the 6-digit code for the given time.
 func Code(secret string, t time.Time) (string, error) {
 	key, err := b32.DecodeString(secret)

@@ -153,3 +153,32 @@ func (d *DB) DeleteSite(domain string) error {
 	}
 	return nil
 }
+
+// childTablesByDomain lists the per-site tables keyed on a plain `site_domain`
+// TEXT column (no FK/cascade), which therefore must be cleaned explicitly when
+// a site is destroyed. Otherwise the rows are orphaned and silently inherited
+// by a future site that reuses the same domain — a cross-tenant leak (stale
+// cron commands re-run, old webhook tokens still deploy, etc.).
+var childTablesByDomain = []string{
+	"backups", "deployments", "cron_jobs", "proxy_rules", "ip_rules",
+	"ftp_accounts", "backup_schedules", "webhooks", "uptime_logs",
+}
+
+// DeleteSiteChildData removes every per-domain child row for a site in one
+// transaction. Call it on every destroy path so a reused domain never inherits
+// the previous tenant's data. (uptime_checks, operations, process_scaling,
+// site_secrets and network membership are cleaned separately by the engine.)
+func (d *DB) DeleteSiteChildData(domain string) error {
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin child-data cleanup: %w", err)
+	}
+	defer tx.Rollback()
+	for _, table := range childTablesByDomain {
+		// table names are from a fixed internal allowlist, never user input.
+		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE site_domain = ?`, domain); err != nil {
+			return fmt.Errorf("delete %s rows for %q: %w", table, domain, err)
+		}
+	}
+	return tx.Commit()
+}

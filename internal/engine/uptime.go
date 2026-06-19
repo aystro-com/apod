@@ -58,6 +58,12 @@ func (uc *UptimeChecker) startCheck(domain, url string, intervalSec int, alertWe
 		return
 	}
 
+	// Guard against a non-positive interval (e.g. a bad row persisted before
+	// validation existed): time.NewTicker panics on <= 0, which would crash the
+	// daemon on boot when checks are reloaded.
+	if intervalSec < uptimeMinInterval {
+		intervalSec = uptimeMinInterval
+	}
 	ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
 	stop := make(chan struct{})
 	uc.tickers[domain] = ticker
@@ -291,7 +297,15 @@ func gitRemoteHost(repo string) string {
 }
 
 // Engine methods
+// uptimeMinInterval is the smallest allowed poll interval. A non-positive
+// interval would panic time.NewTicker (crashing the daemon), and too-small a
+// value lets a user hammer their target, so clamp to a sane floor.
+const uptimeMinInterval = 30
+
 func (e *Engine) EnableUptime(ctx context.Context, domain, rawURL string, intervalSec int, alertWebhook string) error {
+	if intervalSec < uptimeMinInterval {
+		return Invalid("uptime interval must be at least %d seconds", uptimeMinInterval)
+	}
 	if err := validatePublicURL(rawURL); err != nil {
 		return Invalid("invalid uptime URL: %v", err)
 	}

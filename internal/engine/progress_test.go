@@ -44,7 +44,7 @@ func TestProgressHubForgetFreesMemory(t *testing.T) {
 	h.Emit("ex.com", ProgressEvent{Step: "Ready", Status: "done", Percent: 100})
 
 	// The retention cleanup frees the buffer so the hub doesn't grow per-site.
-	h.forget("ex.com")
+	h.forget("ex.com", h.gen["ex.com"])
 
 	replay, _, cancel := h.Subscribe("ex.com")
 	defer cancel()
@@ -57,6 +57,44 @@ func TestProgressHubForgetFreesMemory(t *testing.T) {
 	h.mu.Unlock()
 	if hasBuf {
 		t.Error("buffer entry should be deleted after forget")
+	}
+}
+
+// Emit concurrently with a subscriber cancelling must never panic with "send
+// on closed channel" — the exact crash a client closing its tab mid-deploy
+// used to trigger. Run with -race for full coverage.
+func TestProgressHubEmitVsCancelNoPanic(t *testing.T) {
+	h := newProgressHub()
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 2000; i++ {
+			h.Emit("ex.com", ProgressEvent{Step: "x", Percent: i % 100})
+		}
+		close(done)
+	}()
+	for i := 0; i < 2000; i++ {
+		_, _, cancel := h.Subscribe("ex.com")
+		cancel()
+	}
+	<-done
+}
+
+// A retention timer from a finished run must not delete the buffer of a newer
+// run that began within the retention window.
+func TestProgressHubStaleForgetSparesFreshRun(t *testing.T) {
+	h := newProgressHub()
+	h.Emit("ex.com", ProgressEvent{Step: "old", Status: "done", Percent: 100})
+	staleGen := h.gen["ex.com"] // the run the (pending) timer was scheduled for
+
+	h.Begin("ex.com") // a new run starts, bumping the generation
+	h.Emit("ex.com", ProgressEvent{Step: "fresh", Percent: 10})
+
+	h.forget("ex.com", staleGen) // the stale timer fires
+
+	replay, _, cancel := h.Subscribe("ex.com")
+	defer cancel()
+	if len(replay) == 0 || replay[len(replay)-1].Step != "fresh" {
+		t.Errorf("stale forget wiped the fresh run's buffer: %+v", replay)
 	}
 }
 

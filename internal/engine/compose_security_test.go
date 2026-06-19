@@ -40,6 +40,15 @@ func TestValidateComposeSecurity(t *testing.T) {
 		"docker.sock mount":     "services:\n  x:\n    image: a\n    volumes: [\"/var/run/docker.sock:/var/run/docker.sock\"]\n",
 		"relative escape mount": "services:\n  x:\n    image: a\n    volumes: [\"../../../../var/run/docker.sock:/s\"]\n",
 		"etc mount":             "services:\n  x:\n    image: a\n    volumes: [\"/etc:/hostetc\"]\n",
+		// Dangerous unmodeled keys must be rejected, not silently ignored.
+		"volumes_from":          "services:\n  x:\n    image: a\n    volumes_from: [\"apod-traefik\"]\n",
+		"cgroup_parent":         "services:\n  x:\n    image: a\n    cgroup_parent: /evil.slice\n",
+		"group_add":             "services:\n  x:\n    image: a\n    group_add: [\"docker\"]\n",
+		"device_cgroup_rules":   "services:\n  x:\n    image: a\n    device_cgroup_rules: [\"a *:* rwm\"]\n",
+		"sysctls":               "services:\n  x:\n    image: a\n    sysctls: [\"net.ipv4.ip_forward=1\"]\n",
+		"extends":               "services:\n  x:\n    image: a\n    extends:\n      service: base\n",
+		"custom seccomp":        "services:\n  x:\n    image: a\n    security_opt: [\"seccomp=/tmp/allow.json\"]\n",
+		"label disable":         "services:\n  x:\n    image: a\n    security_opt: [\"label=disable\"]\n",
 	}
 	for name, c := range bad {
 		if err := validateComposeSecurity(writeCompose(t, c)); err == nil {

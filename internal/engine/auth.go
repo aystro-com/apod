@@ -63,6 +63,43 @@ func (e *Engine) SetUserPassword(name, password string) error {
 	return nil
 }
 
+// ChangeOwnPassword changes a user's own password after re-verifying their
+// current password and, when 2FA is enabled, a fresh second-factor code. This
+// is the self-service path: it prevents a stolen-but-still-valid session token
+// from being silently converted into a permanent account takeover, since the
+// attacker would also need the current password (and 2FA code).
+func (e *Engine) ChangeOwnPassword(name, currentPassword, code, newPassword string) error {
+	if e.loginThrottle.Locked(name) {
+		return ErrAccountLocked
+	}
+	hash, err := e.db.GetUserPasswordHash(name)
+	if err != nil {
+		return err
+	}
+	// When a password already exists, changing it requires proving knowledge of
+	// the current one (a stolen session alone must not be enough). Setting the
+	// FIRST password (API-key-only account) has nothing to re-verify, so it's
+	// allowed with the already-authenticated credential.
+	if hash != "" {
+		if bcrypt.CompareHashAndPassword([]byte(hash), []byte(currentPassword)) != nil {
+			e.loginThrottle.RecordFailure(name)
+			return errInvalidCredentials
+		}
+	}
+	// Re-verify the second factor, when enabled — same as login.
+	if secret, enabled, _ := e.getUserTOTP(name); enabled {
+		if code == "" {
+			return ErrTwoFactorRequired
+		}
+		if !e.consumeSecondFactor(name, secret, code) {
+			e.loginThrottle.RecordFailure(name)
+			return errInvalidCredentials
+		}
+	}
+	e.loginThrottle.Reset(name)
+	return e.SetUserPassword(name, newPassword)
+}
+
 // LoginWithPassword verifies a username/password pair (and a 2FA code, if the
 // user has 2FA enabled) and creates a session. It returns the raw session
 // token (shown to the client once) and the user.
@@ -97,7 +134,7 @@ func (e *Engine) LoginWithPassword(name, password, code string) (string, *models
 
 	// Second factor, when enabled. A wrong code counts as a failed attempt so
 	// the second factor can't be brute-forced past a correct password.
-	if secret, enabled, _ := e.db.GetUserTOTP(name); enabled {
+	if secret, enabled, _ := e.getUserTOTP(name); enabled {
 		if code == "" {
 			return "", nil, ErrTwoFactorRequired
 		}

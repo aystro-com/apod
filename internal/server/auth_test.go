@@ -209,6 +209,30 @@ func TestUserCanSetOwnPasswordOnly(t *testing.T) {
 	}
 }
 
+// Once a user has a password, a self-service change must prove knowledge of the
+// current one — a valid session/key alone is not enough (stolen-session defense).
+func TestSelfPasswordChangeRequiresCurrent(t *testing.T) {
+	s := newAuthTestServer(t)
+
+	// Set an initial password (no current password needed for the first set).
+	if w, _ := doJSON(t, s, "POST", "/api/v1/users/bob/password", "apod_bobkey",
+		`{"password":"bobs-first-password"}`); w.Code != http.StatusOK {
+		t.Fatalf("initial password set: got %d, want 200", w.Code)
+	}
+
+	// Changing it without the current password is rejected.
+	if w, _ := doJSON(t, s, "POST", "/api/v1/users/bob/password", "apod_bobkey",
+		`{"password":"bobs-second-password"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("change without current password: got %d, want 400", w.Code)
+	}
+
+	// Supplying the correct current password succeeds.
+	if w, _ := doJSON(t, s, "POST", "/api/v1/users/bob/password", "apod_bobkey",
+		`{"current_password":"bobs-first-password","password":"bobs-second-password"}`); w.Code != http.StatusOK {
+		t.Errorf("change with current password: got %d, want 200", w.Code)
+	}
+}
+
 func TestPasswordTooShortRejected(t *testing.T) {
 	s := newAuthTestServer(t)
 	w, _ := doJSON(t, s, "POST", "/api/v1/users/bob/password", "apod_rootkey",

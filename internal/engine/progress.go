@@ -34,12 +34,17 @@ type progressHub struct {
 	mu      sync.Mutex
 	buffers map[string][]ProgressEvent
 	subs    map[string]map[chan ProgressEvent]struct{}
+	// gen is a per-domain run counter. A retention timer captures the run it was
+	// scheduled for so a stale timer from a previous run can't delete a freshly
+	// re-begun buffer.
+	gen map[string]uint64
 }
 
 func newProgressHub() *progressHub {
 	return &progressHub{
 		buffers: map[string][]ProgressEvent{},
 		subs:    map[string]map[chan ProgressEvent]struct{}{},
+		gen:     map[string]uint64{},
 	}
 }
 
@@ -48,6 +53,7 @@ func (h *progressHub) Begin(domain string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.buffers, domain)
+	h.gen[domain]++ // a new run; any pending forget timer is now stale
 }
 
 // Emit records an event and fans it out to current subscribers.
@@ -65,32 +71,38 @@ func (h *progressHub) Emit(domain string, ev ProgressEvent) {
 		buf = buf[len(buf)-200:]
 	}
 	h.buffers[domain] = buf
-	subs := make([]chan ProgressEvent, 0, len(h.subs[domain]))
+	// Fan out while holding the lock. The sends are non-blocking (buffered
+	// channel + default), so this is cheap, and crucially it cannot race a
+	// concurrent cancel() closing a subscriber channel — which would otherwise
+	// panic with "send on closed channel" when a client disconnects mid-stream.
 	for ch := range h.subs[domain] {
-		subs = append(subs, ch)
-	}
-	h.mu.Unlock()
-
-	for _, ch := range subs {
 		select {
 		case ch <- ev:
 		default: // a slow consumer never blocks the deploy; it has the replay buffer
 		}
 	}
+	gen := h.gen[domain]
+	h.mu.Unlock()
 
 	// Once a deploy ends, free its buffer after a short retention window so the
-	// hub does not accumulate one buffer per site forever.
+	// hub does not accumulate one buffer per site forever. The timer is tagged
+	// with the run's generation so a re-deploy within the window isn't wiped.
 	if ev.Terminal() {
-		time.AfterFunc(progressRetention, func() { h.forget(domain) })
+		time.AfterFunc(progressRetention, func() { h.forget(domain, gen) })
 	}
 }
 
 // forget releases a domain's buffer (and any empty subscriber set) once its
-// retention window has elapsed.
-func (h *progressHub) forget(domain string) {
+// retention window has elapsed — but only if no newer run has begun since the
+// timer was scheduled.
+func (h *progressHub) forget(domain string, gen uint64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.gen[domain] != gen {
+		return // a newer run owns the buffer now; this timer is stale
+	}
 	delete(h.buffers, domain)
+	delete(h.gen, domain)
 	if len(h.subs[domain]) == 0 {
 		delete(h.subs, domain)
 	}

@@ -25,9 +25,13 @@ var deployActions = map[string]bool{
 }
 
 // sensitiveLeaf maps the action segment of /sites/{domain}/<action> routes
-// that expose or accept secrets (env values, DB creds, webhook tokens).
+// that expose or accept secrets (env values, DB creds, webhook tokens). It also
+// covers routes that yield a full site archive (backups download, export) or an
+// in-container shell (terminal/clone), all of which can hand over the same
+// secrets the env/db gates protect.
 var sensitiveLeaf = map[string]bool{
 	"env": true, "info": true, "webhook": true, "ftp": true, "db": true,
+	"backups": true, "export": true, "clone": true, "terminal": true,
 }
 
 // patPolicy is the decision for a scoped token on a given request.
@@ -51,13 +55,18 @@ func classify(method string, segs []string) patPolicy {
 			p.management = true
 		}
 	case "users":
-		// /users/{name}/password, /users/{name}/reset-key, DELETE /users/{name}
-		if len(segs) >= 3 && (segs[2] == "password" || segs[2] == "reset-key") {
+		// /users/{name}/{password,reset-key,permissions}, DELETE /users/{name}
+		if len(segs) >= 3 && (segs[2] == "password" || segs[2] == "reset-key" || segs[2] == "permissions") {
 			p.management = true
 		}
 		if len(segs) == 2 && method == http.MethodDelete {
 			p.management = true
 		}
+	case "terminal":
+		// /terminal/exec — an in-container shell that can read any secret, so it
+		// is not reachable under the /sites/{domain} prefix that sensitiveLeaf
+		// covers. Gate it as sensitive in its own right.
+		p.sensitive = true
 	case "sites":
 		// /sites/{domain}/<action> ... and /sites/{domain}/db/<export|import>
 		if len(segs) >= 3 {

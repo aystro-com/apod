@@ -117,6 +117,24 @@ func (e *Engine) RemoveSiteFromNetwork(ctx context.Context, name, domain string)
 	return nil
 }
 
+// leaveAllSharedNetworks removes a site from every shared network it belongs to,
+// both in the DB and by disconnecting its live containers. Used when a site
+// changes owner: shared-network membership is only authorized at join time
+// (same-owner), so a transferred site must be detached or it stays bridged into
+// the previous owner's private network — a cross-tenant isolation breach.
+func (e *Engine) leaveAllSharedNetworks(ctx context.Context, domain string) {
+	nets, err := e.db.ListSiteNetworks(domain)
+	if err != nil {
+		return
+	}
+	for _, n := range nets {
+		e.disconnectSiteFromNetwork(ctx, sharedNetworkName(n), domain)
+	}
+	if err := e.db.RemoveSiteFromAllNetworks(domain); err != nil {
+		log.Printf("shared net: clear membership for %s: %v", domain, err)
+	}
+}
+
 // reconnectSharedNetworks re-attaches a site's containers to every shared
 // network it belongs to. Called after any operation that (re)creates the site's
 // containers, so a deploy/restart/scale never silently drops a link.

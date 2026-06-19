@@ -32,24 +32,41 @@ func (e *Engine) Setup2FA(name string) (secret, uri string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	if err := e.db.SetUserTOTPSecret(name, secret); err != nil {
+	// Encrypt the shared secret at rest so a leaked DB file alone can't generate
+	// valid codes. decryptSecretValue transparently passes through any legacy
+	// plaintext rows, so this is backward compatible.
+	enc, err := e.encryptSecretValue(secret)
+	if err != nil {
+		return "", "", err
+	}
+	if err := e.db.SetUserTOTPSecret(name, enc); err != nil {
 		return "", "", err
 	}
 	return secret, totp.URI(secret, name, "apod"), nil
 }
 
+// getUserTOTP returns the user's decrypted TOTP secret and enabled flag.
+func (e *Engine) getUserTOTP(name string) (secret string, enabled bool, err error) {
+	stored, enabled, err := e.db.GetUserTOTP(name)
+	if err != nil {
+		return "", false, err
+	}
+	secret, err = e.decryptSecretValue(stored)
+	return secret, enabled, err
+}
+
 // Enable2FA confirms setup with a current code, turns on enforcement, and
 // returns one-time recovery codes (shown to the user once).
 func (e *Engine) Enable2FA(name, code string) ([]string, error) {
-	secret, _, err := e.db.GetUserTOTP(name)
+	secret, _, err := e.getUserTOTP(name)
 	if err != nil {
 		return nil, err
 	}
 	if secret == "" {
 		return nil, fmt.Errorf("run 2FA setup first")
 	}
-	step, ok := totp.Verify(secret, code, time.Now())
-	if !ok {
+	now := time.Now()
+	if _, ok := totp.Verify(secret, code, now); !ok {
 		return nil, fmt.Errorf("invalid code")
 	}
 
@@ -61,7 +78,10 @@ func (e *Engine) Enable2FA(name, code string) ([]string, error) {
 	if err := e.db.SetUserRecoveryCodes(name, string(codesJSON)); err != nil {
 		return nil, err
 	}
-	_ = step // enrollment doesn't set the replay floor; the first login does.
+	// The replay floor is set by the first login (consumeSecondFactor advances it
+	// to the top of the drift window); we don't burn it here so the user can log
+	// in immediately after enrolling.
+	_ = now
 	if err := e.db.SetUserTOTPEnabled(name, true); err != nil {
 		return nil, err
 	}
@@ -72,7 +92,7 @@ func (e *Engine) Enable2FA(name, code string) ([]string, error) {
 // Disable2FA turns off 2FA after verifying a current code, wiping the secret
 // and recovery codes.
 func (e *Engine) Disable2FA(name, code string) error {
-	secret, enabled, err := e.db.GetUserTOTP(name)
+	secret, enabled, err := e.getUserTOTP(name)
 	if err != nil {
 		return err
 	}
@@ -92,12 +112,20 @@ func (e *Engine) Disable2FA(name, code string) error {
 // consumeSecondFactor accepts either a TOTP code (rejecting replays of an
 // already-used step) or an unused recovery code, which it then burns.
 func (e *Engine) consumeSecondFactor(name, secret, code string) bool {
-	if step, ok := totp.Verify(secret, code, time.Now()); ok {
+	now := time.Now()
+	if step, ok := totp.Verify(secret, code, now); ok {
 		last, _ := e.db.GetUserTOTPLastStep(name)
 		if step <= last {
 			return false // replay of this or an earlier step
 		}
-		e.db.SetUserTOTPLastStep(name, step)
+		// Advance the floor to the highest step the verifier currently accepts
+		// (current+1), not just the matched step, so no code still inside the ±1
+		// drift window can be replayed.
+		floor := totp.Step(now) + 1
+		if step > floor {
+			floor = step
+		}
+		e.db.SetUserTOTPLastStep(name, floor)
 		return true
 	}
 	return e.consumeRecoveryCode(name, code)

@@ -164,6 +164,15 @@ func decryptWithPassphrase(passphrase string, data []byte) ([]byte, error) {
 // data directory at 0600 — back it up out-of-band; without it, encrypted
 // backups cannot be restored.
 func (e *Engine) backupKey() ([]byte, error) {
+	if e.dataDir == "" {
+		// No persistent store (tests / ephemeral engines): use a stable
+		// per-process key so secret encrypt/decrypt still round-trips.
+		e.ephemeralKeyOnce.Do(func() {
+			e.ephemeralKey = make([]byte, 32)
+			rand.Read(e.ephemeralKey)
+		})
+		return e.ephemeralKey, nil
+	}
 	path := filepath.Join(e.dataDir, "backup.key")
 	if data, err := os.ReadFile(path); err == nil && len(data) == 32 {
 		return data, nil

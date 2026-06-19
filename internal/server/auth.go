@@ -101,13 +101,32 @@ func (h *Handler) SetUserPasswordHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		Password string `json:"password"`
+		Password        string `json:"password"`
+		CurrentPassword string `json:"current_password"`
+		Code            string `json:"code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.engine.SetUserPassword(name, req.Password); err != nil {
+
+	// An admin may reset another user's password outright. A self-service change
+	// must re-authenticate (current password + 2FA) so a stolen session can't be
+	// turned into a permanent takeover.
+	if current.Role == "admin" && current.Name != name {
+		if err := h.engine.SetUserPassword(name, req.Password); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]string{"status": "password_set"})
+		return
+	}
+
+	if err := h.engine.ChangeOwnPassword(name, req.CurrentPassword, req.Code, req.Password); err != nil {
+		if err == engine.ErrTwoFactorRequired {
+			respondError(w, http.StatusUnauthorized, "2fa_required")
+			return
+		}
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}

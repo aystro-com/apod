@@ -53,6 +53,22 @@ func removeEnv(existingJSON, key string) (string, error) {
 // envKeyRe is the POSIX-ish shape of a valid environment variable name.
 var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// validateEnvMap applies the same key-shape and no-newline rules as SetEnv to a
+// whole map. Import/clone/restore paths persist env maps directly (bypassing
+// SetEnv), so they must run this first or a crafted key/value can inject extra
+// lines into a compose .env file.
+func validateEnvMap(env map[string]string) error {
+	for key, value := range env {
+		if !envKeyRe.MatchString(key) {
+			return Invalid("invalid environment variable name %q", key)
+		}
+		if strings.ContainsAny(key, "\r\n") || strings.ContainsAny(value, "\r\n") {
+			return Invalid("environment values must not contain newlines")
+		}
+	}
+	return nil
+}
+
 func (e *Engine) SetEnv(ctx context.Context, domain, key, value string) error {
 	// Validate the key shape and forbid CR/LF in key or value: env values are
 	// written verbatim into compose .env files (KEY=VALUE per line), so a

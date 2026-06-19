@@ -170,6 +170,13 @@ func (e *Engine) TransferSite(ctx context.Context, domain, newOwner string) erro
 
 	oldOwner := site.Owner
 
+	// A change of owner must drop the site from the previous owner's shared
+	// networks — membership is only authorized for same-owner sites, so leaving
+	// it connected would bridge the new owner into the old owner's private net.
+	if newOwner != oldOwner {
+		e.leaveAllSharedNetworks(ctx, domain)
+	}
+
 	// Update DB
 	if err := e.db.UpdateSiteOwner(domain, newOwner); err != nil {
 		return err

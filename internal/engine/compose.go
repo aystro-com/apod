@@ -137,26 +137,40 @@ func validateComposeSecurity(composeFile string) error {
 		return err
 	}
 
-	var compose struct {
-		Services map[string]struct {
-			Image       string      `yaml:"image"`
-			Privileged  bool        `yaml:"privileged"`
-			CapAdd      []string    `yaml:"cap_add"`
-			Devices     []any       `yaml:"devices"`
-			Pid         string      `yaml:"pid"`
-			Ipc         string      `yaml:"ipc"`
-			NetworkMode string      `yaml:"network_mode"`
-			UsernsMode  string      `yaml:"userns_mode"`
-			SecurityOpt []string    `yaml:"security_opt"`
-			Volumes     []yaml.Node `yaml:"volumes"`
-		} `yaml:"services"`
+	// Decode services as raw nodes first so we can inspect EVERY key the tenant
+	// supplied — a typed-struct decode silently drops keys it doesn't model, and
+	// Docker honors several unmodeled keys (volumes_from, cgroup_parent,
+	// group_add, device_cgroup_rules, sysctls, extends, …) that weaken isolation.
+	var root struct {
+		Services map[string]yaml.Node `yaml:"services"`
 	}
-	if err := yaml.Unmarshal(data, &compose); err != nil {
+	if err := yaml.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("parse compose: %w", err)
 	}
 
+	type svcConfig struct {
+		Image       string      `yaml:"image"`
+		Privileged  bool        `yaml:"privileged"`
+		CapAdd      []string    `yaml:"cap_add"`
+		Devices     []any       `yaml:"devices"`
+		Pid         string      `yaml:"pid"`
+		Ipc         string      `yaml:"ipc"`
+		NetworkMode string      `yaml:"network_mode"`
+		UsernsMode  string      `yaml:"userns_mode"`
+		SecurityOpt []string    `yaml:"security_opt"`
+		Volumes     []yaml.Node `yaml:"volumes"`
+	}
+
 	compDir := filepath.Dir(composeFile)
-	for name, svc := range compose.Services {
+	for name, node := range root.Services {
+		// Refuse any dangerous key not modeled (and validated) below.
+		if err := rejectDangerousComposeKeys(name, node); err != nil {
+			return err
+		}
+		var svc svcConfig
+		if err := node.Decode(&svc); err != nil {
+			return fmt.Errorf("service %q: parse: %w", name, err)
+		}
 		if !imageAllowed(svc.Image) {
 			return fmt.Errorf("service %q: image %q is not from an allowed registry", name, svc.Image)
 		}
@@ -190,16 +204,54 @@ func validateComposeSecurity(composeFile string) error {
 		if isHostNamespace(svc.UsernsMode) {
 			return fmt.Errorf("service %q: userns_mode: host is not allowed", name)
 		}
+		// Allowlist security_opt: only no-new-privileges is permitted. A denylist
+		// for "unconfined" alone missed custom profiles (seccomp=/path.json,
+		// apparmor=, label=disable) that also disable confinement.
 		for _, so := range svc.SecurityOpt {
-			ls := strings.ToLower(strings.ReplaceAll(so, " ", ""))
-			if strings.Contains(ls, "unconfined") || strings.Contains(ls, "seccomp=unconfined") {
-				return fmt.Errorf("service %q: security_opt %q is not allowed", name, so)
+			norm := strings.Trim(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(so), " ", "")), "\"'")
+			if norm == "no-new-privileges" || norm == "no-new-privileges:true" || norm == "no-new-privileges:false" {
+				continue
 			}
+			return fmt.Errorf("service %q: security_opt %q is not allowed", name, so)
 		}
 		for _, v := range svc.Volumes {
 			if err := checkComposeVolume(name, compDir, v); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// dangerousComposeKeys are top-level service keys that can weaken container
+// isolation and are NOT otherwise modeled/validated by validateComposeSecurity.
+// They have no legitimate tenant use, so we refuse a compose file that sets any
+// of them rather than silently ignoring them (the typed decode would). Keys
+// that ARE validated elsewhere (cap_add, devices, pid, ipc, network_mode,
+// privileged, userns_mode, security_opt) are intentionally absent here.
+var dangerousComposeKeys = map[string]bool{
+	"volumes_from":        true, // mount another container's volumes (cross-tenant)
+	"cgroup_parent":       true, // escape the shared resource pool
+	"cgroup":              true,
+	"group_add":           true, // join host groups (e.g. docker GID)
+	"device_cgroup_rules": true, // device access without `devices:`
+	"sysctls":             true, // set kernel/namespace sysctls
+	"extends":             true, // merges unvalidated config at `up` time
+	"uts":                 true, // host UTS namespace
+	"runtime":             true, // alternate runtime (e.g. runc replacement)
+	"oom_kill_disable":    true,
+}
+
+// rejectDangerousComposeKeys fails if a service's raw mapping contains any
+// denylisted key, regardless of whether the typed decode would model it.
+func rejectDangerousComposeKeys(service string, node yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.ToLower(strings.TrimSpace(node.Content[i].Value))
+		if dangerousComposeKeys[key] {
+			return fmt.Errorf("service %q: compose key %q is not allowed", service, key)
 		}
 	}
 	return nil

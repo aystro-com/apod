@@ -38,6 +38,12 @@ type Engine struct {
 	loginThrottle *loginThrottle
 	progress      *progressHub
 	progressOnce  sync.Once
+	// ephemeralKey is a per-process secret-encryption key used only when no
+	// dataDir is configured (tests / ephemeral engines), so encrypt/decrypt of
+	// secrets works without a persistent key file. A real deployment always sets
+	// dataDir and uses the persisted backup.key instead.
+	ephemeralKey     []byte
+	ephemeralKeyOnce sync.Once
 }
 
 type Config struct {
@@ -715,6 +721,9 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) (er
 			e.db.DeleteProcessScaling(domain)
 			e.db.DeleteSiteSecrets(domain)
 			e.db.RemoveSiteFromAllNetworks(domain)
+			if err := e.db.DeleteSiteChildData(domain); err != nil {
+				log.Printf("destroy %s: child-data cleanup: %v", domain, err)
+			}
 			if purge {
 				siteRoot, _ := e.SiteDir(site.Owner, domain)
 				os.RemoveAll(filepath.Dir(siteRoot))
@@ -751,10 +760,22 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) (er
 	e.db.DeleteProcessScaling(domain)
 	e.db.DeleteSiteSecrets(domain)
 	e.db.RemoveSiteFromAllNetworks(domain)
+	if err := e.db.DeleteSiteChildData(domain); err != nil {
+		log.Printf("destroy %s: child-data cleanup: %v", domain, err)
+	}
 
 	if purge {
 		e.emitProgress(domain, "Deleting site data", "running", "", 80)
-		siteDir := filepath.Join(e.dataDir, "sites", domain)
+		// Site files for an owned site live under the owner's home, not the
+		// engine data dir; use SiteDir so a purge actually deletes the data (and
+		// the .env secrets) instead of a non-existent /var/lib path.
+		var siteDir string
+		if site != nil && site.Owner != "" {
+			siteRoot, _ := e.SiteDir(site.Owner, domain)
+			siteDir = filepath.Dir(siteRoot)
+		} else {
+			siteDir = filepath.Join(e.dataDir, "sites", domain)
+		}
 		if err := os.RemoveAll(siteDir); err != nil {
 			return fmt.Errorf("remove site data: %w", err)
 		}
