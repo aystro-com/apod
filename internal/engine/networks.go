@@ -53,6 +53,11 @@ func (e *Engine) ListSharedNetworks(ctx context.Context, owner string) ([]db.Sha
 	return e.db.ListSharedNetworks(owner)
 }
 
+// GetSharedNetwork returns one shared network (with members), or ok=false.
+func (e *Engine) GetSharedNetwork(ctx context.Context, name string) (db.SharedNetwork, bool, error) {
+	return e.db.GetSharedNetwork(name)
+}
+
 // DeleteSharedNetwork disconnects every member and removes the network.
 func (e *Engine) DeleteSharedNetwork(ctx context.Context, name string) error {
 	sn, ok, err := e.db.GetSharedNetwork(name)

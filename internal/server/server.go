@@ -115,6 +115,14 @@ func New(e *engine.Engine) *Server {
 		r.Get("/sites/{domain}/backups/schedule", h.ListBackupSchedulesHandler)
 		r.Delete("/sites/{domain}/backups/schedule", h.RemoveBackupScheduleHandler)
 
+		// Shared networks (connect sites' private networks on purpose)
+		r.Post("/networks", h.CreateNetworkHandler)
+		r.Get("/networks", h.ListNetworksHandler)
+		r.Delete("/networks/{name}", h.DeleteNetworkHandler)
+		r.Post("/networks/{name}/members", h.AddNetworkMemberHandler)
+		r.Delete("/networks/{name}/members/{domain}", h.RemoveNetworkMemberHandler)
+		r.Get("/sites/{domain}/network", h.SiteNetworkHandler)
+
 		// Deploy
 		r.Post("/sites/{domain}/deploy", h.DeployHandler)
 		r.Post("/sites/{domain}/update", h.UpdateSiteHandler)
