@@ -306,6 +306,8 @@ func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, repli
 	if err := e.reconcileService(ctx, domain, svcName, replicas); err != nil {
 		return err
 	}
+	// New replica containers must join the site's shared networks too.
+	e.reconnectSharedNetworks(ctx, domain)
 	e.LogActivity(domain, "process_scale", fmt.Sprintf("%s -> %d", svcName, replicas), "success")
 	return nil
 }

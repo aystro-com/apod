@@ -56,6 +56,9 @@ func (e *Engine) UpdateSite(ctx context.Context, domain string) error {
 		return err
 	}
 
+	// Recreated containers are new — re-attach them to any shared networks.
+	e.reconnectSharedNetworks(ctx, domain)
+
 	e.emitProgress(domain, "Ready", "done", domain+" updated to latest", 100)
 	e.LogActivity(domain, "update", "updated to latest images", "success")
 	return nil

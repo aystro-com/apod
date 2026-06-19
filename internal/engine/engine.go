@@ -700,6 +700,7 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 			}
 			e.db.DeleteProcessScaling(domain)
 			e.db.DeleteSiteSecrets(domain)
+			e.db.RemoveSiteFromAllNetworks(domain)
 			if purge {
 				siteRoot, _ := e.SiteDir(site.Owner, domain)
 				os.RemoveAll(filepath.Dir(siteRoot))
@@ -734,6 +735,7 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) err
 	// Drop any per-service scaling overrides and stored secrets.
 	e.db.DeleteProcessScaling(domain)
 	e.db.DeleteSiteSecrets(domain)
+	e.db.RemoveSiteFromAllNetworks(domain)
 
 	if purge {
 		siteDir := filepath.Join(e.dataDir, "sites", domain)
@@ -758,6 +760,7 @@ func (e *Engine) StartSite(ctx context.Context, domain string) error {
 			if err := e.StartComposeSite(ctx, domain, site.Owner); err != nil {
 				return err
 			}
+			e.reconnectSharedNetworks(ctx, domain)
 			return e.db.UpdateSiteStatus(domain, "running")
 		}
 	}
@@ -778,6 +781,8 @@ func (e *Engine) StartSite(ctx context.Context, domain string) error {
 		}
 	}
 
+	// Re-attach to any shared networks (membership must survive a restart).
+	e.reconnectSharedNetworks(ctx, domain)
 	return e.db.UpdateSiteStatus(domain, "running")
 }
 

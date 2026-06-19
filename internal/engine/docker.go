@@ -351,6 +351,24 @@ func (d *Docker) RemoveNetwork(ctx context.Context, name string) error {
 	return d.cli.NetworkRemove(ctx, name)
 }
 
+// DisconnectNetwork detaches a container from a network (force, so it works even
+// if the container is stopped).
+func (d *Docker) DisconnectNetwork(ctx context.Context, networkName, containerID string) error {
+	return d.cli.NetworkDisconnect(ctx, networkName, containerID, true)
+}
+
+// ContainerIPOnNetwork returns a container's IPv4 on a specific network, or "".
+func (d *Docker) ContainerIPOnNetwork(ctx context.Context, name, network string) string {
+	info, err := d.cli.ContainerInspect(ctx, name)
+	if err != nil || info.NetworkSettings == nil {
+		return ""
+	}
+	if ep, ok := info.NetworkSettings.Networks[network]; ok && ep != nil {
+		return ep.IPAddress
+	}
+	return ""
+}
+
 // ExecInContainer runs cmd and fails if it exits non-zero. Use ExecCombined for
 // interactive cases where a non-zero exit is a normal result, not an error.
 func (d *Docker) ExecInContainer(ctx context.Context, containerID string, cmd []string) (string, error) {

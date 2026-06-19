@@ -188,6 +188,16 @@ var migrations = []struct {
 		value       TEXT NOT NULL,
 		PRIMARY KEY (site_domain, key)
 	)`},
+	{30, `CREATE TABLE IF NOT EXISTS shared_networks (
+		name       TEXT PRIMARY KEY,
+		owner      TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`},
+	{31, `CREATE TABLE IF NOT EXISTS shared_network_members (
+		network     TEXT NOT NULL,
+		site_domain TEXT NOT NULL,
+		PRIMARY KEY (network, site_domain)
+	)`},
 }
 
 func (d *DB) migrate() error {
