@@ -1,6 +1,10 @@
 package db
 
-import "fmt"
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+)
 
 // SetProcessReplicas records a per-service replica override for a site,
 // replacing any existing value (including 0, to pause a worker).
@@ -27,8 +31,8 @@ func (d *DB) GetProcessReplicas(siteDomain, service string) (n int, ok bool, err
 	case nil:
 		return n, true, nil
 	default:
-		// sql.ErrNoRows (and any other error) => treat as "no override".
-		if scanErr.Error() == "sql: no rows in result set" {
+		// sql.ErrNoRows => treat as "no override".
+		if errors.Is(scanErr, sql.ErrNoRows) {
 			return 0, false, nil
 		}
 		return 0, false, scanErr

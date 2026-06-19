@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/robfig/cron/v3"
 )
 
 type CronManager struct {
+	mu     sync.Mutex // guards the cm.cron pointer swap in Reload
 	cron   *cron.Cron
 	engine *Engine
 }
@@ -46,7 +48,7 @@ func (cm *CronManager) LoadJobs() error {
 		command := job.Command
 		service := job.Service
 
-		cm.cron.AddFunc(job.Schedule, func() {
+		if _, err := cm.cron.AddFunc(job.Schedule, func() {
 			ctx := context.Background()
 
 			// Check if this is a compose site
@@ -68,12 +70,18 @@ func (cm *CronManager) LoadJobs() error {
 			if err != nil {
 				log.Printf("cron job failed [%s] %s: %v", domain, command, err)
 			}
-		})
+		}); err != nil {
+			// A row whose schedule no longer parses would otherwise be silently
+			// dropped — log it so the job's absence is diagnosable.
+			log.Printf("cron: skipping job for %s (bad schedule %q): %v", domain, job.Schedule, err)
+		}
 	}
 	return nil
 }
 
 func (cm *CronManager) Reload() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	cm.cron.Stop()
 	cm.cron = cron.New()
 	cm.LoadJobs()

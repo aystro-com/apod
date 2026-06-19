@@ -36,6 +36,7 @@ type Engine struct {
 	uptimeChecker *UptimeChecker
 	cronManager   *CronManager
 	loginThrottle *loginThrottle
+	scheduleMu    sync.Mutex // guards the e.scheduler pointer swap on schedule changes
 	progress      *progressHub
 	progressOnce  sync.Once
 	// ephemeralKey is a per-process secret-encryption key used only when no

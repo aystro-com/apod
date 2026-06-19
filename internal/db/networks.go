@@ -73,11 +73,18 @@ func (d *DB) ListSharedNetworks(owner string) ([]SharedNetwork, error) {
 
 // DeleteSharedNetwork removes a network and all its memberships.
 func (d *DB) DeleteSharedNetwork(name string) error {
-	if _, err := d.conn.Exec(`DELETE FROM shared_network_members WHERE network = ?`, name); err != nil {
+	tx, err := d.conn.Begin()
+	if err != nil {
 		return err
 	}
-	_, err := d.conn.Exec(`DELETE FROM shared_networks WHERE name = ?`, name)
-	return err
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM shared_network_members WHERE network = ?`, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM shared_networks WHERE name = ?`, name); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // AddNetworkMember attaches a site to a shared network (idempotent).

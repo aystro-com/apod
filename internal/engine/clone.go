@@ -202,7 +202,9 @@ func (e *Engine) cloneCompose(ctx context.Context, source *models.Site, driver *
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			// Don't silently skip an unreadable entry — that produces a clone with
+			// missing files (e.g. a broken DB data dir) reported as success.
+			return fmt.Errorf("walk %s: %w", path, err)
 		}
 		relPath, _ := filepath.Rel(src, path)
 		dstPath := filepath.Join(dst, relPath)
@@ -231,13 +233,13 @@ func copyDir(src, dst string) error {
 		default:
 			srcFile, oerr := os.Open(path)
 			if oerr != nil {
-				return nil
+				return fmt.Errorf("open %s: %w", path, oerr)
 			}
 			defer srcFile.Close()
 			os.MkdirAll(filepath.Dir(dstPath), 0755)
 			dstFile, cerr := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
 			if cerr != nil {
-				return nil
+				return fmt.Errorf("create %s: %w", dstPath, cerr)
 			}
 			if _, err := io.Copy(dstFile, srcFile); err != nil {
 				dstFile.Close()

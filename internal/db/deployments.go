@@ -62,7 +62,7 @@ func (d *DB) ListDeployments(siteDomain string) ([]Deployment, error) {
 		}
 		deps = append(deps, dep)
 	}
-	return deps, nil
+	return deps, rows.Err()
 }
 
 func (d *DB) GetLatestDeployment(siteDomain string) (*Deployment, error) {

@@ -1,6 +1,10 @@
 package db
 
-import "fmt"
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+)
 
 // SetSiteSecret stores (or replaces) a generated secret for a site — the
 // authoritative record for values like the database password, so backup, clone
@@ -26,7 +30,7 @@ func (d *DB) GetSiteSecret(siteDomain, key string) (value string, ok bool, err e
 	switch scanErr := row.Scan(&value); {
 	case scanErr == nil:
 		return value, true, nil
-	case scanErr.Error() == "sql: no rows in result set":
+	case errors.Is(scanErr, sql.ErrNoRows):
 		return "", false, nil
 	default:
 		return "", false, scanErr

@@ -46,7 +46,7 @@ func (s *Scheduler) LoadSchedules() error {
 		storageName := sched.StorageName
 		keepCount := sched.KeepCount
 
-		s.cron.AddFunc(sched.CronExpr, func() {
+		if _, err := s.cron.AddFunc(sched.CronExpr, func() {
 			ctx := context.Background()
 			log.Printf("scheduled backup: %s -> %s", domain, storageName)
 
@@ -67,7 +67,9 @@ func (s *Scheduler) LoadSchedules() error {
 			}
 
 			log.Printf("scheduled backup complete: %s (%d old backups cleaned)", domain, len(deleted))
-		})
+		}); err != nil {
+			log.Printf("schedule: skipping backup for %s (bad cron %q): %v", domain, sched.CronExpr, err)
+		}
 	}
 
 	return nil

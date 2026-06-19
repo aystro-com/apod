@@ -21,6 +21,16 @@ func (e *Engine) AddBackupSchedule(ctx context.Context, domain, duration, storag
 	if err != nil {
 		return 0, fmt.Errorf("create schedule: %w", err)
 	}
+	e.reloadScheduler()
+	return id, nil
+}
+
+// reloadScheduler rebuilds the backup scheduler from the DB. The pointer swap is
+// mutex-guarded so two concurrent schedule changes can't race on e.scheduler
+// (leaking a running cron goroutine set or losing schedules).
+func (e *Engine) reloadScheduler() {
+	e.scheduleMu.Lock()
+	defer e.scheduleMu.Unlock()
 	if e.scheduler != nil {
 		e.scheduler.Stop()
 		e.scheduler = NewScheduler()
@@ -28,7 +38,6 @@ func (e *Engine) AddBackupSchedule(ctx context.Context, domain, duration, storag
 		e.scheduler.LoadSchedules()
 		e.scheduler.Start()
 	}
-	return id, nil
 }
 
 func (e *Engine) ListBackupSchedules(ctx context.Context, domain string) (interface{}, error) {
@@ -39,13 +48,7 @@ func (e *Engine) RemoveBackupSchedule(ctx context.Context, scheduleID int64, dom
 	if err := e.db.DeleteScheduleForSite(scheduleID, domain); err != nil {
 		return err
 	}
-	if e.scheduler != nil {
-		e.scheduler.Stop()
-		e.scheduler = NewScheduler()
-		e.scheduler.SetEngine(e)
-		e.scheduler.LoadSchedules()
-		e.scheduler.Start()
-	}
+	e.reloadScheduler()
 	return nil
 }
 

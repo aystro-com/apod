@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -40,15 +41,13 @@ func (e *Engine) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err == nil {
 		var memTotal, memAvail uint64
-		fmt.Sscanf(string(data), "MemTotal: %d kB\nMemFree: %d", &memTotal, &memAvail)
-		// Rough parse — get MemTotal and MemAvailable
-		lines := string(data)
-		fmt.Sscanf(lines, "MemTotal:%d", &memTotal)
-		for _, line := range splitLines(lines) {
-			if len(line) > 13 && line[:13] == "MemTotal:" {
+		// Parse line-by-line keyed on the field prefix. (The previous fixed
+		// line[:13] slice never matched "MemTotal:" — only 9 chars — so MemTotal
+		// was being recovered by accident from an earlier whole-buffer scan.)
+		for _, line := range splitLines(string(data)) {
+			if strings.HasPrefix(line, "MemTotal:") {
 				fmt.Sscanf(line, "MemTotal: %d kB", &memTotal)
-			}
-			if len(line) > 13 && line[:13] == "MemAvailable:" {
+			} else if strings.HasPrefix(line, "MemAvailable:") {
 				fmt.Sscanf(line, "MemAvailable: %d kB", &memAvail)
 			}
 		}

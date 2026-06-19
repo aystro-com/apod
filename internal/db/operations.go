@@ -50,7 +50,7 @@ func (d *DB) ListOperations(siteDomain string, limit int) ([]Operation, error) {
 		}
 		ops = append(ops, op)
 	}
-	return ops, nil
+	return ops, rows.Err()
 }
 
 func (d *DB) ListAllOperations(limit int) ([]Operation, error) {
