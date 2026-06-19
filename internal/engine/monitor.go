@@ -16,6 +16,11 @@ import (
 // per-call round-trip across many containers without flooding the daemon.
 const statsConcurrency = 16
 
+// statsSem globally bounds concurrent container-stats calls. Without it, the
+// per-container fan-out below multiplies with the per-site fan-out in
+// GetAllStats (statsConcurrency × containers-per-site) and can flood the daemon.
+var statsSem = make(chan struct{}, statsConcurrency)
+
 // cpuSampleTTL evicts cached CPU samples for containers we haven't seen in a
 // while (destroyed sites), so the cache can't grow without bound.
 const cpuSampleTTL = 10 * time.Minute
@@ -75,6 +80,8 @@ func (e *Engine) GetSiteStats(ctx context.Context, domain string) (*SiteStats, e
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
+			statsSem <- struct{}{}
+			defer func() { <-statsSem }()
 			cpu, memMB, ok := e.containerStats(ctx, id)
 			if !ok {
 				return
