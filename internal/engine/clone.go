@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/aystro/apod/internal/models"
 )
@@ -37,6 +38,12 @@ func (e *Engine) Clone(ctx context.Context, sourceDomain, targetDomain string) e
 		return err
 	}
 	defer e.locks.Release(sourceDomain)
+
+	// Cloning copies the source's files, data and database into a brand-new
+	// site — long-running, and must run to completion regardless of whether the
+	// client that kicked it off is still connected.
+	ctx, cancel := detachCtx(ctx, 15*time.Minute)
+	defer cancel()
 
 	source, err := e.db.GetSite(sourceDomain)
 	if err != nil {

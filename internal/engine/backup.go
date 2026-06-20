@@ -247,6 +247,12 @@ func (e *Engine) CreateBackup(ctx context.Context, domain, storageName string) (
 	}
 	defer e.locks.Release(domain)
 
+	// Dumping the database and uploading the archive to (possibly remote)
+	// storage can outlast the client connection. Detach so a backup that has
+	// started runs to completion instead of leaving a partial upload.
+	ctx, cancel := detachCtx(ctx, 15*time.Minute)
+	defer cancel()
+
 	// Stream coarse progress for a user-initiated backup. (The pre-deploy
 	// snapshot calls createBackup directly and stays silent inside the deploy's
 	// own stream, so it doesn't reset the deploy's progress buffer.)

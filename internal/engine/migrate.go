@@ -209,6 +209,12 @@ func (e *Engine) waitForDBReady(ctx context.Context, containerName, dbType, dbUs
 }
 
 func (e *Engine) ImportSite(ctx context.Context, zipPath, newDomain, owner, passphrase string) error {
+	// Importing provisions a whole new site and replays its database — a long,
+	// destructive operation that must finish regardless of the client
+	// connection that started it.
+	ctx, cancel := detachCtx(ctx, 15*time.Minute)
+	defer cancel()
+
 	data, err := os.ReadFile(zipPath)
 	if err != nil {
 		return fmt.Errorf("read export file: %w", err)

@@ -288,6 +288,11 @@ func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, repli
 	}
 	defer e.locks.Release(domain)
 
+	// Scaling recreates containers; detach so it completes even if the client
+	// that requested it disconnects mid-operation.
+	ctx, cancel := detachCtx(ctx, 5*time.Minute)
+	defer cancel()
+
 	site, err := e.db.GetSite(domain)
 	if err != nil || site == nil {
 		return NotFound("site %q not found", domain)

@@ -189,6 +189,12 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 	}
 	defer e.locks.Release(opts.Domain)
 
+	// Provisioning pulls images and starts containers — well beyond a browser or
+	// proxy idle timeout. Detach so a create that has started runs to completion
+	// (or rolls itself back) regardless of whether the client is still waiting.
+	ctx, cancel := detachCtx(ctx, 15*time.Minute)
+	defer cancel()
+
 	driver, err := e.drivers.Load(opts.Driver)
 	if err != nil {
 		return fmt.Errorf("load driver: %w", err)
@@ -803,6 +809,11 @@ func (e *Engine) StartSite(ctx context.Context, domain string) error {
 	}
 	defer e.locks.Release(domain)
 
+	// Detach: the operation changes container state and must complete even if
+	// the client that started it disconnects.
+	ctx, cancel := detachCtx(ctx, 3*time.Minute)
+	defer cancel()
+
 	site, _ := e.db.GetSite(domain)
 	if site != nil {
 		driver, _ := e.drivers.Load(site.Driver)
@@ -841,6 +852,12 @@ func (e *Engine) StopSite(ctx context.Context, domain string) error {
 		return err
 	}
 	defer e.locks.Release(domain)
+
+	// Detach: stopping the panel's own container drops the request connection
+	// mid-operation, which would otherwise cancel the stop and leave it
+	// half-done. It must complete regardless of the client.
+	ctx, cancel := detachCtx(ctx, 3*time.Minute)
+	defer cancel()
 
 	site, _ := e.db.GetSite(domain)
 	if site != nil {

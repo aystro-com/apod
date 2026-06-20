@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
@@ -14,6 +15,13 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 		return err
 	}
 	defer e.locks.Release(domain)
+
+	// A deploy pulls images and recreates containers — longer than a browser or
+	// proxy holds an idle connection, and recreating the panel's own container
+	// drops the request connection outright. Detach so a started deploy always
+	// finishes instead of being cancelled half-way, leaving the site broken.
+	ctx, cancel := detachCtx(ctx, 15*time.Minute)
+	defer cancel()
 
 	site, err := e.db.GetSite(domain)
 	if err != nil {

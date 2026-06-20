@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (e *Engine) DBExport(ctx context.Context, domain string) (string, error) {
@@ -60,6 +61,12 @@ func (e *Engine) DBImport(ctx context.Context, domain, dump string) error {
 		return err
 	}
 	defer e.locks.Release(domain)
+
+	// Replaying a dump into the live database is destructive and can outlast the
+	// client connection (same failure mode as a backup restore). Detach so a
+	// dropped browser can't cancel it mid-import and corrupt the database.
+	ctx, cancel := detachCtx(ctx, 15*time.Minute)
+	defer cancel()
 
 	site, err := e.db.GetSite(domain)
 	if err != nil {
