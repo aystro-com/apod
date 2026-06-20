@@ -564,6 +564,15 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 	}
 	defer e.locks.Release(domain)
 
+	// Detach from the request context. A restore downloads + decrypts the
+	// archive, restarts the site's containers, waits for the DB to accept
+	// connections, then replays the dump — easily longer than a browser/proxy
+	// will hold an idle connection. If the client drops, ctx would otherwise be
+	// cancelled mid-restore and the database `exec` fails with "context
+	// canceled"/"deadline exceeded", leaving the site half-restored.
+	ctx, cancel := detachCtx(ctx, 15*time.Minute)
+	defer cancel()
+
 	e.beginOp(domain, "Restoring backup")
 	defer func() {
 		e.finishOp(domain, "Restored", fmt.Sprintf("backup #%d restored", backupID), err)
