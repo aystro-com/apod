@@ -814,6 +814,13 @@ func (e *Engine) StartSite(ctx context.Context, domain string) error {
 	ctx, cancel := detachCtx(ctx, 3*time.Minute)
 	defer cancel()
 
+	return e.startSiteLocked(ctx, domain)
+}
+
+// startSiteLocked is StartSite without lock acquisition — for callers that
+// already hold the site lock (RestartSite holds one lock across stop+start so
+// nothing can slip in between and leave the site stopped).
+func (e *Engine) startSiteLocked(ctx context.Context, domain string) error {
 	site, _ := e.db.GetSite(domain)
 	if site != nil {
 		driver, _ := e.drivers.Load(site.Driver)
@@ -859,6 +866,11 @@ func (e *Engine) StopSite(ctx context.Context, domain string) error {
 	ctx, cancel := detachCtx(ctx, 3*time.Minute)
 	defer cancel()
 
+	return e.stopSiteLocked(ctx, domain)
+}
+
+// stopSiteLocked is StopSite without lock acquisition — see startSiteLocked.
+func (e *Engine) stopSiteLocked(ctx context.Context, domain string) error {
 	site, _ := e.db.GetSite(domain)
 	if site != nil {
 		driver, _ := e.drivers.Load(site.Driver)
@@ -885,15 +897,23 @@ func (e *Engine) StopSite(ctx context.Context, domain string) error {
 }
 
 func (e *Engine) RestartSite(ctx context.Context, domain string) error {
+	// One lock across stop+start: taking and releasing the lock per phase would
+	// let another operation (a scheduled backup, a deploy) slip in between, fail
+	// the start with "site is busy", and leave the site stopped.
+	if err := e.locks.Acquire(domain, "restarting"); err != nil {
+		return err
+	}
+	defer e.locks.Release(domain)
+
 	// Detach: restarting the panel's own site drops the web client's connection
 	// when we stop it, which would cancel ctx and skip the start — leaving the
 	// panel down. The restart must complete regardless of the client.
-	ctx, cancel := detachCtx(ctx, 3*time.Minute)
+	ctx, cancel := detachCtx(ctx, 6*time.Minute)
 	defer cancel()
-	if err := e.StopSite(ctx, domain); err != nil {
+	if err := e.stopSiteLocked(ctx, domain); err != nil {
 		return err
 	}
-	return e.StartSite(ctx, domain)
+	return e.startSiteLocked(ctx, domain)
 }
 
 func (e *Engine) ListSites(ctx context.Context) ([]models.Site, error) {

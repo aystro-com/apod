@@ -158,6 +158,11 @@ func (e *Engine) Rollback(ctx context.Context, domain string) error {
 	}
 	defer e.locks.Release(domain)
 
+	// Mutating op: resets the working tree and bounces containers, so it must
+	// complete even if the requesting client disconnects mid-way.
+	ctx, cancel := detachCtx(ctx, 5*time.Minute)
+	defer cancel()
+
 	dep, err := e.db.GetLatestDeployment(domain)
 	if err != nil {
 		return NotFound("no deployment to rollback: %v", err)
@@ -188,7 +193,6 @@ func (e *Engine) Rollback(ctx context.Context, domain string) error {
 
 	e.db.UpdateDeploymentStatus(dep.ID, "rolled_back")
 	e.LogActivity(domain, "rollback", fmt.Sprintf("rolled back from %s", dep.CommitHash), "success")
-	_ = site
 	return nil
 }
 

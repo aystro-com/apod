@@ -162,7 +162,12 @@ func (e *Engine) cloneCompose(ctx context.Context, source *models.Site, driver *
 	}
 
 	sourceRoot, sourceData := e.SiteDir(source.Owner, source.Domain)
-	target, _ := e.db.GetSite(targetDomain)
+	target, err := e.db.GetSite(targetDomain)
+	if err != nil || target == nil {
+		// CreateSite just succeeded, so this is a transient DB failure — bail
+		// rather than dereferencing nil and panicking the daemon.
+		return fmt.Errorf("load freshly created target site: %w", err)
+	}
 	targetRoot, targetData := e.SiteDir(target.Owner, targetDomain)
 
 	// Copy only driver-declared paths (e.g. uploads) — not raw DB data or the
