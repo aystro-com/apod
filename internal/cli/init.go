@@ -106,11 +106,6 @@ var initCmd = &cobra.Command{
 			}
 		}
 
-		// Copy bundled drivers if available
-		fmt.Print("Setting up drivers... ")
-		exec.Command("apod", "update", "drivers").Run()
-		fmt.Println("OK")
-
 		// Build the daemon command for the chosen TLS mode.
 		execStart := "/usr/local/bin/apod server --data-dir " + dataDir
 		switch tlsMode {
@@ -150,6 +145,23 @@ WantedBy=multi-user.target
 			exec.Command("systemctl", "enable", "apod").Run()
 			exec.Command("systemctl", "start", "apod").Run()
 			fmt.Println("  Service enabled and started.")
+
+			// Refresh drivers AFTER the daemon is up: `apod update drivers`
+			// talks to the control socket, so running it before the service
+			// started (as this used to) always failed silently and printed a
+			// misleading "OK". Wait briefly for the socket, then refresh.
+			fmt.Print("  Setting up drivers... ")
+			for i := 0; i < 10; i++ {
+				if _, serr := os.Stat("/run/apod/apod.sock"); serr == nil {
+					break
+				}
+				time.Sleep(time.Second)
+			}
+			if err := exec.Command("apod", "update", "drivers").Run(); err != nil {
+				fmt.Println("skipped (bundled drivers already installed)")
+			} else {
+				fmt.Println("OK")
+			}
 		}
 
 		// Mode-specific follow-up.

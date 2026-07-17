@@ -118,7 +118,9 @@ var backupDeleteCmd = &cobra.Command{
 			return perr
 		}
 		body := map[string]int64{"backup_id": backupID}
-		_, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/backups/delete", args[0]), body)
+		// Server exposes deletion as DELETE /backups with the id in the body —
+		// there is no POST /backups/delete route (that 404'd every delete).
+		_, err := client.Delete2(fmt.Sprintf("/api/v1/sites/%s/backups", args[0]), body)
 		if err != nil {
 			return err
 		}
