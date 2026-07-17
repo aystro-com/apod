@@ -63,6 +63,9 @@ func (d *DB) ListUsers() ([]models.User, error) {
 		}
 		users = append(users, u)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return users, nil
 }
 

@@ -61,7 +61,12 @@ func (l *Local) Delete(_ context.Context, key string) error {
 }
 
 func (l *Local) List(_ context.Context, prefix string) ([]string, error) {
-	dir := filepath.Join(l.baseDir, prefix)
+	// Same traversal guard as Upload/Download/Delete — a raw join would let a
+	// "../" prefix enumerate (and via the returned keys, read) outside baseDir.
+	dir, err := safeJoin(l.baseDir, prefix)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

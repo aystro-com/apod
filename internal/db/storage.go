@@ -54,6 +54,9 @@ func (d *DB) ListStorageConfigs() ([]StorageConfig, error) {
 		}
 		configs = append(configs, sc)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return configs, nil
 }
 

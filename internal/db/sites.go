@@ -56,6 +56,9 @@ func (d *DB) ListSites() ([]models.Site, error) {
 		}
 		sites = append(sites, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return sites, nil
 }
 
@@ -78,6 +81,9 @@ func (d *DB) ListSitesByOwner(owner string) ([]models.Site, error) {
 		}
 		sites = append(sites, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return sites, nil
 }
 
@@ -97,25 +103,25 @@ func (d *DB) UpdateSiteStatus(domain, status string) error {
 }
 
 func (d *DB) UpdateSiteConfig(domain string, fields map[string]string) error {
-	for key, value := range fields {
-		var query string
+	// Validate every key before touching the DB, then apply in one transaction:
+	// map iteration order is random, so a bad key mixed with good ones would
+	// otherwise sometimes half-apply before erroring.
+	queries := make(map[string]string, len(fields))
+	for key := range fields {
 		switch key {
-		case "ram":
-			query = `UPDATE sites SET ram = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
-		case "cpu":
-			query = `UPDATE sites SET cpu = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
-		case "storage":
-			query = `UPDATE sites SET storage = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
-		case "env":
-			query = `UPDATE sites SET env = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
-		case "repo":
-			query = `UPDATE sites SET repo = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
-		case "branch":
-			query = `UPDATE sites SET branch = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
+		case "ram", "cpu", "storage", "env", "repo", "branch":
+			queries[key] = `UPDATE sites SET ` + key + ` = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?`
 		default:
 			return fmt.Errorf("unknown config field: %s", key)
 		}
-		result, err := d.conn.Exec(query, value, domain)
+	}
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin update site config: %w", err)
+	}
+	defer tx.Rollback()
+	for key, query := range queries {
+		result, err := tx.Exec(query, fields[key], domain)
 		if err != nil {
 			return fmt.Errorf("update %s: %w", key, err)
 		}
@@ -124,7 +130,7 @@ func (d *DB) UpdateSiteConfig(domain string, fields map[string]string) error {
 			return fmt.Errorf("site %q not found", domain)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (d *DB) UpdateSiteOwner(domain, owner string) error {

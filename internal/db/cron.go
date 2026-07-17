@@ -47,6 +47,9 @@ func (d *DB) ListCronJobs(siteDomain string) ([]CronJob, error) {
 		j.Active = active == 1
 		jobs = append(jobs, j)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return jobs, nil
 }
 
@@ -67,6 +70,9 @@ func (d *DB) ListAllCronJobs() ([]CronJob, error) {
 		}
 		j.Active = active == 1
 		jobs = append(jobs, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
 	}
 	return jobs, nil
 }

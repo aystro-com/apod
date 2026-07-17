@@ -42,6 +42,9 @@ func (d *DB) ListFTPAccounts(siteDomain string) ([]FTPAccount, error) {
 		if err := rows.Scan(&a.ID, &a.SiteDomain, &a.Username, &a.CreatedAt); err != nil { return nil, err }
 		accounts = append(accounts, a)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return accounts, nil
 }
 

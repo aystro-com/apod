@@ -65,6 +65,9 @@ func (d *DB) ListDomains(siteID int64) ([]string, error) {
 		}
 		domains = append(domains, domain)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return domains, nil
 }
 

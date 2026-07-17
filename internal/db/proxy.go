@@ -29,6 +29,9 @@ func (d *DB) ListProxyRules(siteDomain string) ([]ProxyRule, error) {
 		if err := rows.Scan(&r.ID, &r.SiteDomain, &r.RuleType, &r.Config, &r.CreatedAt); err != nil { return nil, err }
 		rules = append(rules, r)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return rules, nil
 }
 

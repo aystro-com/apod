@@ -59,6 +59,9 @@ func (d *DB) ListBackups(siteDomain string) ([]Backup, error) {
 		}
 		backups = append(backups, b)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return backups, nil
 }
 
@@ -76,7 +79,10 @@ func (d *DB) DeleteBackup(id int64) error {
 
 func (d *DB) DeleteOldestBackups(siteDomain, storageName string, keep int) ([]string, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, path FROM backups WHERE site_domain = ? AND storage_name = ? ORDER BY created_at DESC LIMIT -1 OFFSET ?`,
+		// id breaks created_at ties (1s resolution): two backups in the same
+		// second would otherwise order arbitrarily, letting retention keep the
+		// stale one and delete the newest.
+		`SELECT id, path FROM backups WHERE site_domain = ? AND storage_name = ? ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?`,
 		siteDomain, storageName, keep,
 	)
 	if err != nil {
@@ -95,6 +101,11 @@ func (d *DB) DeleteOldestBackups(siteDomain, storageName string, keep int) ([]st
 			return nil, fmt.Errorf("scan old backup: %w", err)
 		}
 		old = append(old, b)
+	}
+	// A cursor error means the candidate list may be truncated — bail before
+	// deleting anything rather than pruning from an incomplete view.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate old backups: %w", err)
 	}
 
 	// Only return paths whose DB row was actually deleted, so the caller never

@@ -74,6 +74,9 @@ func (d *DB) ListAPITokens(userName string) ([]APIToken, error) {
 		}
 		tokens = append(tokens, tok)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return tokens, nil
 }
 

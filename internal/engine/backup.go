@@ -811,12 +811,13 @@ func (e *Engine) DeleteBackup(ctx context.Context, domain string, backupID int64
 // removed precisely so the caller frees the storage — without this, retention
 // deleted the records but left every old archive on disk/S3/SFTP forever.
 func (e *Engine) PruneOldBackups(ctx context.Context, domain, storageName string, keep int) (int, error) {
-	paths, err := e.db.DeleteOldestBackups(domain, storageName, keep)
-	if err != nil {
-		return 0, err
-	}
+	// On a mid-loop failure DeleteOldestBackups still returns the paths whose
+	// rows WERE deleted — those objects must be freed now or never: with the DB
+	// record gone, no future prune can find them. So free storage for whatever
+	// came back before surfacing the row-deletion error.
+	paths, rowErr := e.db.DeleteOldestBackups(domain, storageName, keep)
 	if len(paths) == 0 {
-		return 0, nil
+		return 0, rowErr
 	}
 	site, _ := e.db.GetSite(domain)
 	owner := ""
@@ -833,6 +834,9 @@ func (e *Engine) PruneOldBackups(ctx context.Context, domain, storageName string
 		if derr := store.Delete(ctx, p); derr != nil {
 			log.Printf("retention: delete storage object %q for %s: %v", p, domain, derr)
 		}
+	}
+	if rowErr != nil {
+		return len(paths), fmt.Errorf("prune backup rows: %w", rowErr)
 	}
 	return len(paths), nil
 }

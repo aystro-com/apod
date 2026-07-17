@@ -75,6 +75,9 @@ func (d *DB) ListUptimeChecks() ([]UptimeCheck, error) {
 		uc.Active = active == 1
 		checks = append(checks, uc)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return checks, nil
 }
 
@@ -139,6 +142,9 @@ func (d *DB) GetUptimeLogs(domain string, limit int) ([]UptimeLog, error) {
 		}
 		l.IsUp = isUp == 1
 		logs = append(logs, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
 	}
 	return logs, nil
 }

@@ -28,6 +28,9 @@ func (d *DB) ListSSHKeys() ([]SSHKey, error) {
 		if err := rows.Scan(&k.ID, &k.Name, &k.PublicKey, &k.CreatedAt); err != nil { return nil, err }
 		keys = append(keys, k)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return keys, nil
 }
 

@@ -54,6 +54,9 @@ func (d *DB) ListWebhooks(siteDomain string) ([]Webhook, error) {
 		wh.Active = active == 1
 		whs = append(whs, wh)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return whs, nil
 }
 

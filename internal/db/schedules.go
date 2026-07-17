@@ -43,6 +43,9 @@ func (d *DB) ListSchedules(siteDomain string) ([]BackupSchedule, error) {
 		}
 		schedules = append(schedules, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
 	return schedules, nil
 }
 
@@ -62,6 +65,9 @@ func (d *DB) ListAllSchedules() ([]BackupSchedule, error) {
 			return nil, fmt.Errorf("scan schedule: %w", err)
 		}
 		schedules = append(schedules, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
 	}
 	return schedules, nil
 }

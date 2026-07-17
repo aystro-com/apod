@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -186,9 +188,19 @@ func (s *SFTPStorage) List(_ context.Context, prefix string) ([]string, error) {
 	}
 	defer client.Close()
 
-	dir := filepath.Join(s.basePath, prefix)
+	// Same traversal guard as Upload/Download/Delete — a raw join would let a
+	// "../" prefix enumerate outside basePath.
+	dir, err := safeJoin(s.basePath, prefix)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := client.ReadDir(dir)
 	if err != nil {
+		// Match Local.List: a prefix that doesn't exist yet is an empty
+		// listing, not an error.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("sftp readdir: %w", err)
 	}
 
