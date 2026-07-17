@@ -74,6 +74,7 @@ func sanitizeComposeFile(path string) error {
 	lines := strings.Split(string(data), "\n")
 	var out []string
 	inPorts := false
+	inFlowPorts := false
 	portsIndent := 0
 	serviceIndent := -1
 	currentService := ""
@@ -110,9 +111,26 @@ func sanitizeComposeFile(path string) error {
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "ports:") && !strings.HasPrefix(trimmed, "ports: [") {
-			inPorts = true
-			portsIndent = len(line) - len(strings.TrimLeft(line, " \t"))
+		if strings.HasPrefix(trimmed, "ports:") {
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "ports:"))
+			if rest == "" || strings.HasPrefix(rest, "#") {
+				// Block style: strip the following "- ..." items.
+				inPorts = true
+				portsIndent = len(line) - len(strings.TrimLeft(line, " \t"))
+			} else if strings.HasPrefix(rest, "[") && !strings.Contains(rest, "]") {
+				// Flow style spanning lines: consume until the closing bracket.
+				inFlowPorts = true
+			}
+			// Inline flow style ("ports: [\"8080:80\"]") is dropped with this
+			// line — the old exclusion let it through, and a tenant compose
+			// could publish host ports directly (hijack :80/:443, expose a DB
+			// publicly), bypassing Traefik and per-site isolation.
+			continue
+		}
+		if inFlowPorts {
+			if strings.Contains(trimmed, "]") {
+				inFlowPorts = false
+			}
 			continue
 		}
 		if inPorts {
@@ -754,13 +772,20 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 		}
 		routerName := strings.ReplaceAll(opts.Domain, ".", "-")
 
+		// Mirror the native path (TraefikLabels): attach an ACME resolver only
+		// when apod manages certs. Hardcoding "letsencrypt" broke external-TLS
+		// deployments — the router referenced a resolver Traefik never defines,
+		// so Traefik rejected it and the compose site never served HTTPS.
+		tlsSection := fmt.Sprintf("  [http.routers.%s.tls]\n", routerName)
+		if resolver := e.tls.CertResolver(); resolver != "" {
+			tlsSection += fmt.Sprintf("    certResolver = %q\n", resolver)
+		}
+
 		traefikConfig := fmt.Sprintf(`[http.routers.%s]
   rule = "Host(`+"`"+`%s`+"`"+`)"
   service = "%s"
   entrypoints = ["websecure"]
-  [http.routers.%s.tls]
-    certResolver = "letsencrypt"
-
+`+tlsSection+`
 [http.routers.%s-http]
   rule = "Host(`+"`"+`%s`+"`"+`)"
   service = "%s"
@@ -769,11 +794,11 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 [http.services.%s.loadBalancer]
   [[http.services.%s.loadBalancer.servers]]
     url = "http://%s:%s"
-`, routerName, opts.Domain, routerName, routerName,
+`, routerName, opts.Domain, routerName,
 			routerName, opts.Domain, routerName,
 			routerName, routerName, proxyService, proxyPort)
 
-		traefikDir := "/etc/apod/traefik/dynamic"
+		traefikDir := traefikDynamicDir
 		os.MkdirAll(traefikDir, 0755)
 		if err := os.WriteFile(filepath.Join(traefikDir, opts.Domain+".toml"), []byte(traefikConfig), 0644); err != nil {
 			return fmt.Errorf("write traefik config: %w", err)
@@ -791,7 +816,7 @@ var composeProgressKeywords = []string{
 }
 
 // sanitizeProgressLine strips control characters and caps length so a single
-// noisy compose line (progress bars use carriage returns/ANSI) cannotinjを
+// noisy compose line (progress bars use carriage returns/ANSI) cannot
 // inject garbage or unbounded data into the event stream.
 func sanitizeProgressLine(s string) string {
 	var b strings.Builder
@@ -938,7 +963,7 @@ func (e *Engine) DestroyComposeSite(ctx context.Context, domain, owner string) e
 	cmd.CombinedOutput() // best effort
 
 	// Remove Traefik routing config
-	os.Remove(filepath.Join("/etc/apod/traefik/dynamic", domain+".toml"))
+	os.Remove(filepath.Join(traefikDynamicDir, domain+".toml"))
 
 	// Remove shared cgroup slice
 	sliceName := "apod-" + project + ".slice"

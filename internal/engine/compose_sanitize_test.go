@@ -79,3 +79,36 @@ func TestSanitizeStripsHostPorts(t *testing.T) {
 		t.Errorf("host port binding should be stripped:\n%s", out)
 	}
 }
+
+// Inline flow-style ports must be stripped too — they used to slip through the
+// sanitizer, letting a tenant compose publish host ports directly.
+func TestSanitizeStripsInlineFlowPorts(t *testing.T) {
+	in := `services:
+  web:
+    image: nginx
+    ports: ["0.0.0.0:443:443", "3306:3306"]
+    restart: always
+  multi:
+    image: redis
+    ports: [
+      "6379:6379",
+    ]
+    labels:
+      - keep=me
+`
+	out := sanitizeString(t, in)
+	for _, banned := range []string{"443:443", "3306:3306", "6379:6379", "ports:"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("inline port binding %q should be stripped:\n%s", banned, out)
+		}
+	}
+	for _, kept := range []string{"restart: always", "keep=me"} {
+		if !strings.Contains(out, kept) {
+			t.Errorf("unrelated line %q should survive:\n%s", kept, out)
+		}
+	}
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("sanitized output is not valid YAML: %v\n%s", err, out)
+	}
+}

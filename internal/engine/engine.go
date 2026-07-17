@@ -807,8 +807,9 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) (er
 	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
 	e.docker.RemoveNetwork(ctx, siteNetwork)
 
-	// Remove the site's IP allowlist middleware file.
+	// Remove the site's IP allowlist middleware and alias-router files.
 	os.Remove(filepath.Join(traefikDynamicDir, ipAllowMiddlewareName(domain)+".toml"))
+	os.Remove(aliasRoutingPath(domain))
 
 	// Drop any per-service scaling overrides and stored secrets.
 	e.db.DeleteProcessScaling(domain)

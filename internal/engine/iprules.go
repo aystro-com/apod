@@ -8,8 +8,9 @@ import (
 )
 
 // traefikDynamicDir is the host directory bind-mounted into Traefik as its file
-// provider directory (/etc/traefik/dynamic in the container).
-const traefikDynamicDir = "/etc/apod/traefik/dynamic"
+// provider directory (/etc/traefik/dynamic in the container). A var so tests
+// can point it at a temp dir.
+var traefikDynamicDir = "/etc/apod/traefik/dynamic"
 
 // ipRuleRouterName mirrors the router name used in TraefikLabels.
 func ipRuleRouterName(domain string) string {

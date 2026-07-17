@@ -89,7 +89,12 @@ func (e *Engine) Deploy(ctx context.Context, domain, branch string) error {
 
 		var resetErr error
 		if fetchErr == nil {
-			resetErr = exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "--", "origin/"+branch).Run()
+			// No "--" here: `git reset --hard -- <ref>` treats the ref as a
+			// pathspec and always fails ("Cannot do hard reset with paths"),
+			// which used to shunt EVERY redeploy into the rm -rf + re-clone
+			// fallback below — destroying the site's .env. The ref is safe to
+			// pass positionally: ValidateBranch rejects leading dashes.
+			resetErr = exec.CommandContext(ctx, "git", "-C", siteRoot, "reset", "--hard", "origin/"+branch).Run()
 		}
 		// Not a git repo yet (first deploy), or the reset failed (corrupt repo):
 		// do a fresh clone.
