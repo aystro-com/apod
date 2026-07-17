@@ -83,8 +83,11 @@ func (e *Engine) GetDiskUsage(ctx context.Context) ([]SiteDiskUsage, error) {
 
 	var usage []SiteDiskUsage
 	for _, site := range sites {
-		siteDir := filepath.Join(e.dataDir, "sites", site.Domain)
-		size := dirSize(siteDir)
+		// User-owned sites live under /home/<owner>/sites/<domain>, not the
+		// admin data dir — SiteDir knows both layouts. Its two returns are the
+		// files/ and data/ children, so measure their shared parent.
+		siteRoot, _ := e.SiteDir(site.Owner, site.Domain)
+		size := dirSize(filepath.Dir(siteRoot))
 		usage = append(usage, SiteDiskUsage{Domain: site.Domain, SizeMB: size / 1024 / 1024})
 	}
 	return usage, nil

@@ -95,6 +95,13 @@ func (e *Engine) AllowIP(ctx context.Context, domain, ip string) error {
 	if err := validateIPRule(ip); err != nil {
 		return err
 	}
+	// Fail closed, like BlockIP and AddProxyRule: when enforcement is disabled
+	// the ipWhiteList middleware is never attached to the router (see
+	// TraefikLabels), so accepting the rule would report a locked-down site
+	// that is in fact fully public.
+	if !ipRulesEnforced() {
+		return Invalid("IP allow rules are not enforced on this deployment — set APOD_ENFORCE_IP_RULES=1 (and restart the site) to attach the allowlist middleware before adding rules")
+	}
 	if err := e.db.AddIPRule(domain, ip, "allow"); err != nil {
 		return err
 	}

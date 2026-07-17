@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -40,13 +42,16 @@ func (e *Engine) ApplyDiskQuota(ctx context.Context, owner string) error {
 	totalKB := totalMB * 1024
 
 	// setquota -u <uid> <soft-block> <hard-block> <soft-inode> <hard-inode> <filesystem>
-	// We set soft = hard (no grace period), inodes = 0 (unlimited)
+	// We set soft = hard (no grace period), inodes = 0 (unlimited).
+	// Quotas are per-filesystem: the user's sites live under /home/<owner>, so
+	// target the mount backing that path — a quota on "/" never limits anything
+	// when /home is its own partition.
 	cmd := exec.CommandContext(ctx, "setquota",
 		"-u", strconv.Itoa(user.UID),
 		strconv.FormatInt(totalKB, 10), // soft block limit
 		strconv.FormatInt(totalKB, 10), // hard block limit
 		"0", "0",                       // no inode limits
-		"/", // filesystem
+		mountPointFor(filepath.Join("/home", owner)),
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -57,6 +62,32 @@ func (e *Engine) ApplyDiskQuota(ctx context.Context, owner string) error {
 
 	e.LogActivity(owner, "quota_set", fmt.Sprintf("disk quota set to %dMB for user %s", totalMB, owner), "success")
 	return nil
+}
+
+// mountPointFor returns the mount point of the filesystem backing path, by
+// picking the longest mount point in /proc/self/mounts that is a path-prefix
+// of the (cleaned) target. Falls back to "/" when the table can't be read.
+func mountPointFor(path string) string {
+	data, err := os.ReadFile("/proc/self/mounts")
+	if err != nil {
+		return "/"
+	}
+	path = filepath.Clean(path)
+	best := "/"
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		mp := fields[1]
+		if mp == path || mp == "/" ||
+			(strings.HasPrefix(path, mp) && len(mp) > 1 && path[len(mp)] == '/') {
+			if len(mp) > len(best) {
+				best = mp
+			}
+		}
+	}
+	return best
 }
 
 // parseStorageMB parses storage strings like "5G", "500M", "1T" into MB

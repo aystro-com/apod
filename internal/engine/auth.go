@@ -86,8 +86,14 @@ func (e *Engine) ChangeOwnPassword(name, currentPassword, code, newPassword stri
 			return errInvalidCredentials
 		}
 	}
-	// Re-verify the second factor, when enabled — same as login.
-	if secret, enabled, _ := e.getUserTOTP(name); enabled {
+	// Re-verify the second factor, when enabled — same as login. A failed TOTP
+	// read must fail closed: treating it as "not enabled" would let a transient
+	// DB error skip an enrolled second factor.
+	secret, enabled, err := e.getUserTOTP(name)
+	if err != nil {
+		return fmt.Errorf("verify second factor: %w", err)
+	}
+	if enabled {
 		if code == "" {
 			return ErrTwoFactorRequired
 		}
@@ -133,8 +139,13 @@ func (e *Engine) LoginWithPassword(name, password, code string) (string, *models
 	}
 
 	// Second factor, when enabled. A wrong code counts as a failed attempt so
-	// the second factor can't be brute-forced past a correct password.
-	if secret, enabled, _ := e.getUserTOTP(name); enabled {
+	// the second factor can't be brute-forced past a correct password. A failed
+	// TOTP read fails closed rather than silently skipping an enrolled factor.
+	secret, enabled, terr := e.getUserTOTP(name)
+	if terr != nil {
+		return "", nil, fmt.Errorf("verify second factor: %w", terr)
+	}
+	if enabled {
 		if code == "" {
 			return "", nil, ErrTwoFactorRequired
 		}
