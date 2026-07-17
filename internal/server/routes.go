@@ -197,6 +197,7 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		Storage     string            `json:"storage"`
 		Repo        string            `json:"repo"`
 		Branch      string            `json:"branch"`
+		Owner       string            `json:"owner"`
 		Params      map[string]string `json:"params"`
 	}
 
@@ -216,11 +217,20 @@ func (h *Handler) CreateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set owner to authenticated user (unless admin specifying another owner)
+	// Set owner to authenticated user; an admin may target another owner via
+	// the request (mirrors NewSiteFromBackupHandler). A non-admin's owner is
+	// always forced to their own identity so they can't plant sites under
+	// someone else. An empty owner means admin/global.
 	user := UserFromContext(r.Context())
-	owner := ""
+	owner := req.Owner
 	if user != nil && user.Role != "admin" {
 		owner = user.Name
+	}
+	if owner != "" {
+		if _, err := h.engine.GetUser(owner); err != nil {
+			respondError(w, http.StatusBadRequest, "owner is not a known user")
+			return
+		}
 	}
 
 	opts := engine.CreateSiteOpts{

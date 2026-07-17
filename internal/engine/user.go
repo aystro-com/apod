@@ -125,6 +125,16 @@ func (e *Engine) ListUsers(ctx context.Context) ([]models.User, error) {
 	return e.db.ListUsers()
 }
 
+// GetUser looks up a user by name, returning a NotFound error when absent so
+// callers can validate a supplied owner/username.
+func (e *Engine) GetUser(name string) (*models.User, error) {
+	user, err := e.db.GetUserByName(name)
+	if err != nil || user == nil {
+		return nil, NotFound("user %q not found", name)
+	}
+	return user, nil
+}
+
 // SetUserCanCreateSites grants or revokes a user's site-creation permission.
 func (e *Engine) SetUserCanCreateSites(ctx context.Context, name string, allowed bool) error {
 	user, err := e.db.GetUserByName(name)
