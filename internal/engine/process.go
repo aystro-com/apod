@@ -324,52 +324,79 @@ func (e *Engine) ScaleProcess(ctx context.Context, domain, svcName string, repli
 	return nil
 }
 
-// reconcileService creates or removes replica containers so the running count
-// matches desired. Replicas are indexed 0..desired-1; index 0 carries the
-// legacy container name. It clones configuration from any existing replica.
+// reconcileService brings a worker's replicas to `desired`. Replicas are indexed
+// 0..desired-1; index 0 (the legacy container name) is the TEMPLATE and is never
+// removed — scaling to 0 stops it rather than deleting it. That's the fix for a
+// worker paused at 0 becoming permanently unscalable: the old code removed
+// replica 0, and every scale-up then tried to clone a container that no longer
+// existed. Keeping a stopped replica 0 means the template is always available.
 func (e *Engine) reconcileService(ctx context.Context, domain, svcName string, desired int) error {
-	current, err := e.serviceContainers(ctx, domain, svcName)
-	if err != nil {
-		return err
+	base := replicaContainerName(domain, svcName, 0)
+	exists0, _ := e.docker.ContainerExists(ctx, base)
+	if !exists0 {
+		// The template is gone (e.g. a site scaled to 0 under the old behavior).
+		// We can't reconstruct a service container's full config here, so give an
+		// actionable error instead of an opaque "inspect replica 0" failure.
+		return Invalid("worker %q has no base container to scale from; redeploy the site to recreate it", svcName)
 	}
-	have := len(current)
-	switch {
-	case have == desired:
-		return nil
-	case have > desired:
-		// Remove the highest-indexed replicas first.
-		for i := have - 1; i >= desired; i-- {
+	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
+
+	// removeExtras deletes contiguous replicas from index `from` upward (never
+	// index 0), stopping at the first that doesn't exist.
+	removeExtras := func(from int) error {
+		if from < 1 {
+			from = 1
+		}
+		for i := from; ; i++ {
 			name := replicaContainerName(domain, svcName, i)
+			if ex, _ := e.docker.ContainerExists(ctx, name); !ex {
+				return nil
+			}
 			e.docker.StopContainer(ctx, name)
 			if err := e.docker.RemoveContainer(ctx, name); err != nil {
 				return fmt.Errorf("remove replica %s: %w", name, err)
 			}
 		}
-		return nil
-	default:
-		// Scale up: clone an existing replica's config for each new container.
-		template, err := e.docker.InspectReplica(ctx, replicaContainerName(domain, svcName, 0))
-		if err != nil {
-			return fmt.Errorf("inspect replica 0 of %s: %w", svcName, err)
-		}
-		siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
-		for i := have; i < desired; i++ {
-			cfg := template
-			cfg.Name = replicaContainerName(domain, svcName, i)
-			cfg.Labels = cloneLabels(template.Labels)
-			cfg.Labels[labelPrefix+"replica"] = strconv.Itoa(i)
-			// Stay on the isolated site network only (no default bridge).
-			cfg.NetworkName = siteNetwork
-			id, err := e.docker.CreateContainer(ctx, cfg)
-			if err != nil {
-				return fmt.Errorf("create replica %s: %w", cfg.Name, err)
-			}
-			if err := e.docker.StartContainer(ctx, id); err != nil {
-				return fmt.Errorf("start replica %s: %w", cfg.Name, err)
-			}
-		}
-		return nil
 	}
+
+	if desired <= 0 {
+		// Pause: stop (keep) the template, remove any extra replicas.
+		e.docker.StopContainer(ctx, base)
+		return removeExtras(1)
+	}
+
+	// Ensure the template is running, then use it as the config source.
+	if err := e.docker.StartContainer(ctx, base); err != nil {
+		return fmt.Errorf("start base replica %s: %w", base, err)
+	}
+	template, err := e.docker.InspectReplica(ctx, base)
+	if err != nil {
+		return fmt.Errorf("inspect base replica of %s: %w", svcName, err)
+	}
+	for i := 1; i < desired; i++ {
+		name := replicaContainerName(domain, svcName, i)
+		if ex, _ := e.docker.ContainerExists(ctx, name); ex {
+			if err := e.docker.StartContainer(ctx, name); err != nil {
+				return fmt.Errorf("start replica %s: %w", name, err)
+			}
+			continue
+		}
+		cfg := template
+		cfg.Name = name
+		cfg.Labels = cloneLabels(template.Labels)
+		cfg.Labels[labelPrefix+"replica"] = strconv.Itoa(i)
+		// Stay on the isolated site network only (no default bridge).
+		cfg.NetworkName = siteNetwork
+		id, err := e.docker.CreateContainer(ctx, cfg)
+		if err != nil {
+			return fmt.Errorf("create replica %s: %w", cfg.Name, err)
+		}
+		if err := e.docker.StartContainer(ctx, id); err != nil {
+			return fmt.Errorf("start replica %s: %w", cfg.Name, err)
+		}
+	}
+	// Remove replicas above the desired count.
+	return removeExtras(desired)
 }
 
 // RestartProcess restarts every container of a service (all replicas).

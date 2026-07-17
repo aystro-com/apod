@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -63,8 +64,31 @@ func (e *Engine) SetConfig(ctx context.Context, domain string, key, value string
 		return fmt.Errorf("update config: %w", err)
 	}
 
-	// For resource changes, containers need recreation — this will be wired up
-	// when the full container recreation logic is added
+	// Apply resource changes to the live site so they actually take effect —
+	// previously the new value was persisted but nothing enforced it (not even on
+	// restart, which only start/stops existing containers), so the user's change
+	// silently did nothing. CPU/memory update in place via `docker update`; a
+	// storage change re-applies the owner's disk quota. Best-effort: the value is
+	// already saved, so a failure here is logged, not fatal.
+	switch key {
+	case "ram", "cpu":
+		if site, err := e.db.GetSite(domain); err == nil && site != nil {
+			memMB := int64(parseMemoryMB(site.RAM))
+			cpus, _ := strconv.ParseFloat(strings.TrimSpace(site.CPU), 64)
+			ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
+			for _, id := range ids {
+				if err := e.docker.UpdateContainerResources(ctx, id, memMB, cpus); err != nil {
+					log.Printf("apply %s=%s to %s: %v", key, value, domain, err)
+				}
+			}
+		}
+	case "storage":
+		if site, err := e.db.GetSite(domain); err == nil && site != nil {
+			if err := e.ApplyDiskQuota(ctx, site.Owner); err != nil {
+				log.Printf("apply disk quota for %s: %v", site.Owner, err)
+			}
+		}
+	}
 	return nil
 }
 

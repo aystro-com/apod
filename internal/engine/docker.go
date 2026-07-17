@@ -211,6 +211,21 @@ func (d *Docker) RestartContainer(ctx context.Context, id string) error {
 	return d.cli.ContainerRestart(ctx, id, container.StopOptions{Timeout: &timeout})
 }
 
+// UpdateContainerResources applies new CPU/memory limits to a running container
+// in place (docker update), so a resource-config change takes effect without a
+// destroy/recreate. A memoryMB or cpus <= 0 leaves that limit unchanged.
+func (d *Docker) UpdateContainerResources(ctx context.Context, id string, memoryMB int64, cpus float64) error {
+	res := container.Resources{}
+	if memoryMB > 0 {
+		res.Memory = memoryMB * 1024 * 1024
+	}
+	if cpus > 0 {
+		res.NanoCPUs = int64(cpus * 1e9)
+	}
+	_, err := d.cli.ContainerUpdate(ctx, id, container.UpdateConfig{Resources: res})
+	return err
+}
+
 func (d *Docker) StopContainer(ctx context.Context, id string) error {
 	timeout := 30
 	return d.cli.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})

@@ -100,9 +100,13 @@ func (e *Engine) clonePhysical(ctx context.Context, source *models.Site, driver 
 		copyErr = copyDir(sourceData, targetData)
 	}
 
-	// Bring the source back up as soon as the copy is done — minimise downtime.
-	for _, id := range srcIDs {
-		e.docker.StartContainer(ctx, id)
+	// Bring the source back up as soon as the copy is done — but only if it was
+	// running before. Unconditionally starting it would silently resurrect a site
+	// the operator had deliberately stopped.
+	if source.Status == "running" {
+		for _, id := range srcIDs {
+			e.docker.StartContainer(ctx, id)
+		}
 	}
 	if copyErr != nil {
 		os.RemoveAll(targetRoot)

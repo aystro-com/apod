@@ -364,6 +364,13 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 	// these instead of reverse-engineering them from container env or .env).
 	// Stored encrypted at rest via setSiteSecret.
 	e.setSiteSecret(opts.Domain, "db_password", dbPass)
+	// Persist the effective DB name/user too. A physical clone copies the
+	// source's DB volume (physically named after the SOURCE domain) and passes
+	// DBName through here, but siteVars would otherwise recompute site_db_name
+	// from the TARGET domain — so a later deploy/hook referencing ${site_db_name}
+	// would point at a database that doesn't exist. Storing it makes siteVars
+	// authoritative for cloned sites; for normal sites it equals the default.
+	e.setSiteSecret(opts.Domain, "db_name", dbName)
 	for _, varName := range genOrder {
 		if v, ok := vars[varName]; ok {
 			e.setSiteSecret(opts.Domain, varName, v)
@@ -599,6 +606,18 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 // partway through, leaving no orphan containers, network, files or DB records.
 func (e *Engine) rollbackPartialCreate(domain, owner string) {
 	ctx := context.Background()
+	// For a compose site, `docker compose down -v` is the only thing that removes
+	// the project's default network, named volumes, cgroup slice and Traefik TOML.
+	// The label-based container sweep below leaves all of those orphaned, so a
+	// failed compose create used to strew resources that a same-domain retry then
+	// raced. Tear the project down first (best-effort).
+	if site, err := e.db.GetSite(domain); err == nil && site != nil {
+		if driver, derr := e.drivers.Load(site.Driver); derr == nil && driver != nil && driver.Type == "compose" {
+			if cerr := e.DestroyComposeSite(ctx, domain, owner); cerr != nil {
+				log.Printf("rollback %s: compose teardown: %v", domain, cerr)
+			}
+		}
+	}
 	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
 	for _, id := range ids {
 		e.docker.StopContainer(ctx, id)
@@ -1000,6 +1019,12 @@ var generatedSecretNames = []string{
 func (e *Engine) siteVars(site *models.Site) map[string]string {
 	siteRoot, dataRoot := e.SiteDir(site.Owner, site.Domain)
 	dbName := strings.ReplaceAll(site.Domain, ".", "_")
+	// Prefer the DB name recorded at create — a cloned site's real DB is named
+	// after its source, not its own domain. Falls back to the domain-derived
+	// default for sites created before this was stored.
+	if stored, ok, _ := e.getSiteSecret(site.Domain, "db_name"); ok && stored != "" {
+		dbName = stored
+	}
 	vars := map[string]string{
 		"site_root":    siteRoot,
 		"data_root":    dataRoot,
