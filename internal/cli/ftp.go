@@ -12,9 +12,9 @@ import (
 var ftpCmd = &cobra.Command{Use: "ftp", Short: "Manage FTP/SFTP accounts"}
 
 var ftpAddCmd = &cobra.Command{
-	Use:  "add [domain]",
+	Use:   "add [domain]",
 	Short: "Add FTP account",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		user, _ := cmd.Flags().GetString("user")
@@ -33,9 +33,9 @@ var ftpAddCmd = &cobra.Command{
 }
 
 var ftpListCmd = &cobra.Command{
-	Use:  "list [domain]",
+	Use:   "list [domain]",
 	Short: "List FTP accounts",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		resp, err := client.Get(fmt.Sprintf("/api/v1/sites/%s/ftp", args[0]))
@@ -61,9 +61,9 @@ var ftpListCmd = &cobra.Command{
 }
 
 var ftpRemoveCmd = &cobra.Command{
-	Use:  "remove [domain] [username]",
+	Use:   "remove [domain] [username]",
 	Short: "Remove FTP account",
-	Args: cobra.ExactArgs(2),
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		_, err := client.Delete(fmt.Sprintf("/api/v1/sites/%s/ftp/%s", args[0], args[1]))

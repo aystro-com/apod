@@ -12,9 +12,9 @@ import (
 var sshKeyCmd = &cobra.Command{Use: "ssh-key", Short: "Manage SSH keys"}
 
 var sshKeyAddCmd = &cobra.Command{
-	Use:  "add [name] [public-key]",
+	Use:   "add [name] [public-key]",
 	Short: "Add SSH key",
-	Args: cobra.ExactArgs(2),
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		body := map[string]string{"name": args[0], "public_key": args[1]}
@@ -28,7 +28,7 @@ var sshKeyAddCmd = &cobra.Command{
 }
 
 var sshKeyListCmd = &cobra.Command{
-	Use:  "list",
+	Use:   "list",
 	Short: "List SSH keys",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
@@ -60,9 +60,9 @@ var sshKeyListCmd = &cobra.Command{
 }
 
 var sshKeyRemoveCmd = &cobra.Command{
-	Use:  "remove [name]",
+	Use:   "remove [name]",
 	Short: "Remove SSH key",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		_, err := client.Delete(fmt.Sprintf("/api/v1/ssh-keys/%s", args[0]))

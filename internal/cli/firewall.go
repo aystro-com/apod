@@ -11,7 +11,7 @@ import (
 var firewallCmd = &cobra.Command{Use: "firewall", Short: "Manage server firewall"}
 
 var firewallStatusCmd = &cobra.Command{
-	Use:  "status",
+	Use:   "status",
 	Short: "Show firewall status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
@@ -37,7 +37,7 @@ var firewallStatusCmd = &cobra.Command{
 }
 
 var firewallEnableCmd = &cobra.Command{
-	Use:  "enable",
+	Use:   "enable",
 	Short: "Enable firewall",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
@@ -51,9 +51,9 @@ var firewallEnableCmd = &cobra.Command{
 }
 
 var firewallAllowCmd = &cobra.Command{
-	Use:  "allow [port]",
+	Use:   "allow [port]",
 	Short: "Allow a port",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		body := map[string]string{"port": args[0]}
@@ -67,9 +67,9 @@ var firewallAllowCmd = &cobra.Command{
 }
 
 var firewallDenyCmd = &cobra.Command{
-	Use:  "deny [port]",
+	Use:   "deny [port]",
 	Short: "Deny a port",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		body := map[string]string{"port": args[0]}

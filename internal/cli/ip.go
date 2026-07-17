@@ -27,9 +27,9 @@ var ipAllowCmd = &cobra.Command{
 }
 
 var ipBlockCmd = &cobra.Command{
-	Use:  "block [domain] [ip]",
+	Use:   "block [domain] [ip]",
 	Short: "Block an IP",
-	Args: cobra.ExactArgs(2),
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		body := map[string]string{"ip": args[1]}
@@ -43,9 +43,9 @@ var ipBlockCmd = &cobra.Command{
 }
 
 var ipUnblockCmd = &cobra.Command{
-	Use:  "unblock [domain] [ip]",
+	Use:   "unblock [domain] [ip]",
 	Short: "Unblock an IP",
-	Args: cobra.ExactArgs(2),
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		body := map[string]string{"ip": args[1]}
@@ -59,9 +59,9 @@ var ipUnblockCmd = &cobra.Command{
 }
 
 var ipListCmd = &cobra.Command{
-	Use:  "list [domain]",
+	Use:   "list [domain]",
 	Short: "List IP rules",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		resp, err := client.Get(fmt.Sprintf("/api/v1/sites/%s/ip", args[0]))

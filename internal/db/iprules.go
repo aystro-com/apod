@@ -45,12 +45,16 @@ func (d *DB) UnblockIP(siteDomain, ip string) error {
 
 func (d *DB) ListIPRules(siteDomain string) ([]IPRule, error) {
 	rows, err := d.conn.Query(`SELECT id, site_domain, ip, action, created_at FROM ip_rules WHERE site_domain = ? ORDER BY id`, siteDomain)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var rules []IPRule
 	for rows.Next() {
 		var r IPRule
-		if err := rows.Scan(&r.ID, &r.SiteDomain, &r.IP, &r.Action, &r.CreatedAt); err != nil { return nil, err }
+		if err := rows.Scan(&r.ID, &r.SiteDomain, &r.IP, &r.Action, &r.CreatedAt); err != nil {
+			return nil, err
+		}
 		rules = append(rules, r)
 	}
 	if err := rows.Err(); err != nil {

@@ -54,4 +54,3 @@ func New(driver string, config map[string]string) (Storage, error) {
 		return nil, fmt.Errorf("unknown storage driver: %s", driver)
 	}
 }
-

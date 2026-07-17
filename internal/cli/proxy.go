@@ -12,9 +12,9 @@ import (
 var proxyCmd = &cobra.Command{Use: "proxy", Short: "Manage proxy rules"}
 
 var proxyAddCmd = &cobra.Command{
-	Use:  "add [domain]",
+	Use:   "add [domain]",
 	Short: "Add a proxy rule",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		ruleType, _ := cmd.Flags().GetString("type")
@@ -56,9 +56,9 @@ var proxyAddCmd = &cobra.Command{
 }
 
 var proxyListCmd = &cobra.Command{
-	Use:  "list [domain]",
+	Use:   "list [domain]",
 	Short: "List proxy rules",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		resp, err := client.Get(fmt.Sprintf("/api/v1/sites/%s/proxy", args[0]))
@@ -86,9 +86,9 @@ var proxyListCmd = &cobra.Command{
 }
 
 var proxyRemoveCmd = &cobra.Command{
-	Use:  "remove [domain] [rule-id]",
+	Use:   "remove [domain] [rule-id]",
 	Short: "Remove a proxy rule",
-	Args: cobra.ExactArgs(2),
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := NewClient(flagRemote, flagKey)
 		id, perr := parseID(args[1])
