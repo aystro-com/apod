@@ -56,17 +56,14 @@ func (s *Scheduler) LoadSchedules() error {
 				return
 			}
 
-			deleted, err := s.engine.db.DeleteOldestBackups(domain, storageName, keepCount)
+			// Prune BOTH the DB rows and the underlying storage objects — the
+			// previous code deleted only the rows, leaking every old archive.
+			pruned, err := s.engine.PruneOldBackups(ctx, domain, storageName, keepCount)
 			if err != nil {
-				log.Printf("retention cleanup failed for %s: %v", domain, err)
-				return
+				log.Printf("retention cleanup for %s: %v", domain, err)
 			}
 
-			if len(deleted) > 0 {
-				log.Printf("retention: %d old backup(s) pruned for %s", len(deleted), domain)
-			}
-
-			log.Printf("scheduled backup complete: %s (%d old backups cleaned)", domain, len(deleted))
+			log.Printf("scheduled backup complete: %s (%d old backups pruned)", domain, pruned)
 		}); err != nil {
 			log.Printf("schedule: skipping backup for %s (bad cron %q): %v", domain, sched.CronExpr, err)
 		}

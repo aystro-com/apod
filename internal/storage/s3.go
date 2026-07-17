@@ -94,19 +94,30 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 }
 
 func (s *S3Storage) List(ctx context.Context, prefix string) ([]string, error) {
-	resp, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-		Bucket: &s.bucket,
-		Prefix: &prefix,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("s3 list: %w", err)
-	}
 	var keys []string
-	for _, obj := range resp.Contents {
-		key := strings.TrimPrefix(*obj.Key, prefix)
-		if key != "" {
-			keys = append(keys, *obj.Key)
+	var token *string
+	for {
+		resp, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            &s.bucket,
+			Prefix:            &prefix,
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("s3 list: %w", err)
 		}
+		for _, obj := range resp.Contents {
+			// Return the full key (prefix included), matching the local and SFTP
+			// drivers, which build keys as filepath.Join(prefix, name). Skip the
+			// prefix "directory" placeholder itself.
+			if strings.TrimPrefix(*obj.Key, prefix) != "" {
+				keys = append(keys, *obj.Key)
+			}
+		}
+		// Page through: ListObjectsV2 caps a single response at 1000 objects.
+		if resp.IsTruncated == nil || !*resp.IsTruncated {
+			break
+		}
+		token = resp.NextContinuationToken
 	}
 	return keys, nil
 }

@@ -19,6 +19,12 @@ func (e *Engine) AddBackupSchedule(ctx context.Context, domain, duration, storag
 	if storageName == "" {
 		storageName = "local"
 	}
+	// Retention must keep at least the backup just taken. keepCount < 1 (with
+	// OFFSET 0 in DeleteOldestBackups) would prune every backup including the
+	// newest, leaving the schedule producing nothing.
+	if keepCount < 1 {
+		keepCount = 1
+	}
 	id, err := e.db.CreateSchedule(domain, cronExpr, storageName, keepCount)
 	if err != nil {
 		return 0, fmt.Errorf("create schedule: %w", err)

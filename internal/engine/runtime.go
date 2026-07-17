@@ -74,11 +74,15 @@ func (e *Engine) restoreDatabase(ctx context.Context, domain, owner, service, db
 	if cmd == nil {
 		return Invalid("unsupported database type: %s", dbType)
 	}
+	// Wait for the DB to accept connections first — for BOTH runtimes. Compose
+	// restores previously skipped this and raced the DB container's init, so a
+	// restore/import right after StartComposeSite failed with "connection
+	// refused" and the site came up without its data.
+	e.waitForDBReady(ctx, domain, owner, service, dbType, dbUser, dbName, isCompose)
 	if isCompose {
 		return e.execInComposeSiteInput(ctx, domain, owner, service, cmd, dump)
 	}
 	container := containerNameFor(domain, service)
-	e.waitForDBReady(ctx, container, dbType, dbUser, dbName)
 	_, err := e.docker.ExecWithInput(ctx, container, cmd, dump)
 	return err
 }

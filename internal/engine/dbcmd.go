@@ -67,11 +67,17 @@ func dbRestoreCmd(dbType, dbName, dbUser string, mode dbCredMode) []string {
 // dbProbeCmd returns a cheap readiness check used to wait for a freshly-created
 // database container to accept connections before a restore. Returns nil for
 // engines without a probe.
-func dbProbeCmd(dbType, dbName, dbUser string) []string {
+func dbProbeCmd(dbType, dbName, dbUser string, mode dbCredMode) []string {
 	switch dbType {
 	case "mysql", "mariadb":
+		if mode == superCreds {
+			return shc(`mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e 'SELECT 1'`)
+		}
 		return shc(fmt.Sprintf(`mysql -u%s -p"$MYSQL_PASSWORD" -e 'SELECT 1' %s`, dbUser, dbName))
 	case "postgres":
+		if mode == superCreds {
+			return shc(`psql -U "${POSTGRES_USER:-postgres}" -c 'SELECT 1'`)
+		}
 		return shc(fmt.Sprintf(`psql -U %s -d %s -c 'SELECT 1'`, dbUser, dbName))
 	}
 	return nil

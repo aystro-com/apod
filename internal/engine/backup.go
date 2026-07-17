@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -323,9 +324,12 @@ func (e *Engine) createBackup(ctx context.Context, domain, storageName string) (
 		// Retry up to 6 times with 10s delay (container may still be starting).
 		// siteCapture returns stdout ONLY — a dump must not be polluted by stderr
 		// warnings (e.g. mysqldump's password notice) or exec stream frame headers.
+		// An empty result is treated as not-yet-ready and retried too: even an
+		// empty database dumps schema/headers, so zero bytes means the dump never
+		// actually ran.
 		for attempt := 0; attempt < 6; attempt++ {
 			output, err = e.siteCapture(ctx, domain, site.Owner, dbCfg.Service, isCompose, dumpCmd)
-			if err == nil {
+			if err == nil && len(bytes.TrimSpace(output)) > 0 {
 				break
 			}
 			time.Sleep(10 * time.Second)
@@ -333,9 +337,11 @@ func (e *Engine) createBackup(ctx context.Context, domain, storageName string) (
 		if err != nil {
 			return 0, fmt.Errorf("dump %s database: %w", dbCfg.Type, err)
 		}
+		// Refuse to record a "successful" backup that silently omits a configured
+		// database — the logical dump is the only source of DB data, so an empty
+		// dump would restore as total data loss with only a warning in the log.
 		if len(bytes.TrimSpace(output)) == 0 {
-			e.LogActivity(domain, "backup_warning", fmt.Sprintf("empty %s dump from %s", dbCfg.Type, dbCfg.Service), "warning")
-			continue
+			return 0, fmt.Errorf("%s dump from service %q produced no output; refusing to record a backup missing its database", dbCfg.Type, dbCfg.Service)
 		}
 		w, _ := zw.Create(fmt.Sprintf("databases/%s_%s.sql.gz", dbCfg.Service, dbCfg.Type))
 		gz := gzip.NewWriter(w)
@@ -631,6 +637,30 @@ func (e *Engine) RestoreBackup(ctx context.Context, domain string, backupID int6
 		return fmt.Errorf("backup %d has no restorable data; refusing to restore", backupID)
 	}
 
+	// Validate the archive's metadata BEFORE stopping the site or overwriting any
+	// files. The env map is attacker-controllable (a crafted/corrupt archive), and
+	// the import path already validates before extraction — restore must too, or a
+	// bad env aborts the restore mid-extraction with the live site already
+	// half-overwritten.
+	for _, f := range zr.File {
+		if f.Name != "metadata.json" {
+			continue
+		}
+		rc, oerr := f.Open()
+		if oerr != nil {
+			return fmt.Errorf("open backup metadata: %w", oerr)
+		}
+		data, _ := io.ReadAll(rc)
+		rc.Close()
+		var meta backupMetadata
+		if jerr := json.Unmarshal(data, &meta); jerr == nil {
+			if verr := validateEnvMap(meta.Env); verr != nil {
+				return fmt.Errorf("invalid env in backup metadata: %w", verr)
+			}
+		}
+		break
+	}
+
 	// Stop site
 	e.emitProgress(domain, "Restoring files & database", "running", "", 60)
 	ids, _ := e.docker.ListContainersByLabel(ctx, labelPrefix+"site", domain)
@@ -773,6 +803,38 @@ func (e *Engine) DeleteBackup(ctx context.Context, domain string, backupID int64
 	}
 	store.Delete(ctx, backup.Path)
 	return e.db.DeleteBackup(backupID)
+}
+
+// PruneOldBackups enforces a retention policy for one (domain, storage): it
+// deletes the DB rows beyond the newest `keep` AND removes the corresponding
+// storage objects. DeleteOldestBackups returns the object paths whose rows were
+// removed precisely so the caller frees the storage — without this, retention
+// deleted the records but left every old archive on disk/S3/SFTP forever.
+func (e *Engine) PruneOldBackups(ctx context.Context, domain, storageName string, keep int) (int, error) {
+	paths, err := e.db.DeleteOldestBackups(domain, storageName, keep)
+	if err != nil {
+		return 0, err
+	}
+	if len(paths) == 0 {
+		return 0, nil
+	}
+	site, _ := e.db.GetSite(domain)
+	owner := ""
+	if site != nil {
+		owner = site.Owner
+	}
+	store, serr := e.getStorage(ctx, storageName, owner)
+	if serr != nil {
+		// Rows are already gone; report so the caller logs it, but the object
+		// leak is the lesser evil than leaving dangling records.
+		return len(paths), fmt.Errorf("open storage %q to prune objects: %w", storageName, serr)
+	}
+	for _, p := range paths {
+		if derr := store.Delete(ctx, p); derr != nil {
+			log.Printf("retention: delete storage object %q for %s: %v", p, domain, derr)
+		}
+	}
+	return len(paths), nil
 }
 
 func (e *Engine) ListBackups(ctx context.Context, domain string) ([]db.Backup, error) {

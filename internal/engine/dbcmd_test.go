@@ -48,13 +48,16 @@ func TestDBRestoreCmd(t *testing.T) {
 }
 
 func TestDBProbeCmd(t *testing.T) {
-	if !strings.Contains(joinArgv(dbProbeCmd("mysql", "db", "user")), "SELECT 1") {
+	if !strings.Contains(joinArgv(dbProbeCmd("mysql", "db", "user", siteCreds)), "SELECT 1") {
 		t.Error("mysql probe should SELECT 1")
 	}
-	if !strings.Contains(joinArgv(dbProbeCmd("postgres", "db", "user")), "SELECT 1") {
+	if !strings.Contains(joinArgv(dbProbeCmd("postgres", "db", "user", siteCreds)), "SELECT 1") {
 		t.Error("postgres probe should SELECT 1")
 	}
-	if dbProbeCmd("mongo", "", "") != nil {
+	if !strings.Contains(joinArgv(dbProbeCmd("postgres", "db", "user", superCreds)), "postgres") {
+		t.Error("postgres super probe should use the superuser")
+	}
+	if dbProbeCmd("mongo", "", "", siteCreds) != nil {
 		t.Error("mongo has no probe")
 	}
 }

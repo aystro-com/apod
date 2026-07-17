@@ -49,16 +49,24 @@ func (e *Engine) ExportSite(ctx context.Context, domain, outputDir, passphrase s
 	dbName := strings.ReplaceAll(domain, ".", "_")
 	dbUser := dbName
 
-	// Dump databases (gzip-compressed)
+	// Dump databases (gzip-compressed). Route through siteCapture with the right
+	// credential mode: compose sites have no `apod-<domain>-<service>` container
+	// and use compose-managed superuser creds. Hardcoding the native container +
+	// siteCreds (the old behavior) silently produced an export with NO database
+	// for every compose site, which then migrated as total DB loss.
+	isCompose := driver.Type == "compose"
+	dumpMode := siteCreds
+	if isCompose {
+		dumpMode = superCreds
+	}
 	for _, dbCfg := range driver.Backup.Databases {
-		containerName := fmt.Sprintf("apod-%s-%s", domain, dbCfg.Service)
-		dumpCmd := dbDumpCmd(dbCfg.Type, dbName, dbUser, siteCreds)
+		dumpCmd := dbDumpCmd(dbCfg.Type, dbName, dbUser, dumpMode)
 		if dumpCmd == nil {
 			continue
 		}
 		// Capture stdout only — stderr warnings and exec frame headers would
 		// corrupt the SQL.
-		output, err := e.docker.ExecCaptureStdout(ctx, containerName, dumpCmd)
+		output, err := e.siteCapture(ctx, domain, site.Owner, dbCfg.Service, isCompose, dumpCmd)
 		if err != nil {
 			e.LogActivity(domain, "export_warning", fmt.Sprintf("db dump failed for %s: %v", dbCfg.Service, err), "warning")
 			continue
@@ -187,17 +195,32 @@ func dbPasswordFromZip(zr *zip.Reader) string {
 	return ""
 }
 
-// waitForDBReady polls a freshly-created database container until it accepts a
-// credentialed connection (or a timeout elapses), so a subsequent dump import
-// does not race container initialization. Best-effort: it never returns an
-// error, callers proceed regardless.
-func (e *Engine) waitForDBReady(ctx context.Context, containerName, dbType, dbUser, dbName string) {
-	probe := dbProbeCmd(dbType, dbName, dbUser)
+// waitForDBReady polls a freshly-started database service until it accepts a
+// credentialed connection (or a timeout elapses), so a subsequent dump restore
+// does not race container initialization. It works for BOTH runtimes: native
+// sites exec into apod-<domain>-<service> with the per-site creds; compose sites
+// exec via `docker compose exec` with the superuser creds. Best-effort: it never
+// returns an error, callers proceed regardless.
+func (e *Engine) waitForDBReady(ctx context.Context, domain, owner, service, dbType, dbUser, dbName string, isCompose bool) {
+	mode := siteCreds
+	if isCompose {
+		mode = superCreds
+	}
+	probe := dbProbeCmd(dbType, dbName, dbUser, mode)
 	if probe == nil {
 		return
 	}
+	container := containerNameFor(domain, service)
 	for i := 0; i < 45; i++ {
-		out, err := e.docker.ExecInContainer(ctx, containerName, probe)
+		var out string
+		var err error
+		if isCompose {
+			var b []byte
+			b, err = e.execInComposeSiteStdout(ctx, domain, owner, service, probe)
+			out = string(b)
+		} else {
+			out, err = e.docker.ExecInContainer(ctx, container, probe)
+		}
 		low := strings.ToLower(out)
 		if err == nil && !strings.Contains(low, "error") &&
 			!strings.Contains(low, "denied") && !strings.Contains(low, "refused") &&
