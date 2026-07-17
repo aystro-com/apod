@@ -28,6 +28,15 @@ func (e *Engine) Setup2FA(name string) (secret, uri string, err error) {
 	if _, err := e.db.GetUserByName(name); err != nil {
 		return "", "", err
 	}
+	// Refuse to re-enroll while 2FA is already active. Otherwise a stolen session
+	// (which is exactly what 2FA is meant to survive) could POST /2fa/setup to
+	// replace the victim's live authenticator secret with an attacker-chosen one
+	// — while totp_enabled stays true — then compute valid codes or Disable2FA.
+	// The enabled flag is read directly (not via getUserTOTP) so a decrypt error
+	// can't be mistaken for "not enabled". Disable2FA is the supported reset path.
+	if _, enabled, gerr := e.db.GetUserTOTP(name); gerr == nil && enabled {
+		return "", "", Invalid("2FA is already enabled; disable it before re-enrolling")
+	}
 	secret, err = totp.NewSecret()
 	if err != nil {
 		return "", "", err
