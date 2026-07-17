@@ -136,6 +136,33 @@ func TestIntegrationWorkerScaling(t *testing.T) {
 		}
 		return len(ids)
 	}
+	// running reports whether a specific container is currently up.
+	running := func(name string) bool {
+		containers, err := e.docker.ListSiteContainers(ctx, itDomain)
+		if err != nil {
+			t.Fatalf("list site containers: %v", err)
+		}
+		for _, c := range containers {
+			if c.Name == name {
+				return c.Running
+			}
+		}
+		return false
+	}
+	// runningWorkers counts how many worker containers are actually up (the
+	// user-visible replica count, ignoring a stopped template).
+	runningWorkers := func() int {
+		procs, err := e.ListProcesses(ctx, itDomain)
+		if err != nil {
+			t.Fatalf("list processes: %v", err)
+		}
+		for _, p := range procs {
+			if p.Service == "worker" {
+				return p.Running
+			}
+		}
+		return 0
+	}
 
 	if got := count(); got != 1 {
 		t.Fatalf("expected 1 worker before scaling, got %d", got)
@@ -200,12 +227,24 @@ func TestIntegrationWorkerScaling(t *testing.T) {
 		t.Error("replica 2 must be removed on scale-down")
 	}
 
-	// Scale to zero (pause) — no worker containers remain.
+	// Scale to zero (pause). By design the template (replica 0) is STOPPED but
+	// KEPT — deleting it is what used to make a paused worker permanently
+	// unscalable (nothing left to clone on scale-up). So exactly one container
+	// remains, and it must not be running.
 	if err := e.ScaleProcess(ctx, itDomain, "worker", 0); err != nil {
 		t.Fatalf("scale to zero: %v", err)
 	}
-	if got := count(); got != 0 {
-		t.Fatalf("expected 0 workers after scale-to-zero, got %d", got)
+	if got := count(); got != 1 {
+		t.Fatalf("expected the stopped template to remain after scale-to-zero, got %d containers", got)
+	}
+	if !running(replicaContainerName(itDomain, "worker", 0)) {
+		// running() returns false when stopped — this is the state we want.
+	} else {
+		t.Error("template replica 0 must be stopped (not running) after scale-to-zero")
+	}
+	// The user-visible guarantee: zero workers are actually running.
+	if got := runningWorkers(); got != 0 {
+		t.Fatalf("expected 0 running workers after scale-to-zero, got %d", got)
 	}
 
 	// The override is persisted.
@@ -213,6 +252,14 @@ func TestIntegrationWorkerScaling(t *testing.T) {
 		t.Errorf("expected persisted override 0, got (%d,%v)", n, ok)
 	}
 
+	// The whole point of keeping the template: scale-up from a paused worker
+	// must work by cloning it, not fail with "no base container to scale from".
+	if err := e.ScaleProcess(ctx, itDomain, "worker", 2); err != nil {
+		t.Fatalf("scale up from zero: %v", err)
+	}
+	if got := runningWorkers(); got != 2 {
+		t.Fatalf("expected 2 running workers after scaling back up from zero, got %d", got)
+	}
 }
 
 func TestIntegrationScaleRejectsNonWorker(t *testing.T) {
