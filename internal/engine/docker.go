@@ -395,6 +395,18 @@ func (d *Docker) RemoveNetwork(ctx context.Context, name string) error {
 	return d.cli.NetworkRemove(ctx, name)
 }
 
+// NetworkExists reports whether a network with the given name is present.
+func (d *Docker) NetworkExists(ctx context.Context, name string) (bool, error) {
+	_, err := d.cli.NetworkInspect(ctx, name, network.InspectOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if client.IsErrNotFound(err) {
+		return false, nil
+	}
+	return false, err
+}
+
 // DisconnectNetwork detaches a container from a network (force, so it works even
 // if the container is stopped).
 func (d *Docker) DisconnectNetwork(ctx context.Context, networkName, containerID string) error {

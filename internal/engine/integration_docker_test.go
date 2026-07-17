@@ -277,3 +277,65 @@ func TestIntegrationScaleRejectsNonWorker(t *testing.T) {
 		t.Error("scaling a non-worker service should be rejected")
 	}
 }
+
+// TestIntegrationNetworkRemovalWithAttachedEndpoint reproduces the site-destroy
+// network leak: apod attaches Traefik to each site network so it can route to
+// the backend, and Docker refuses to remove a network that still has an active
+// endpoint. Destroying a site must therefore disconnect Traefik BEFORE removing
+// the network, or the network leaks (a stale endpoint on Traefik) on every
+// destroy. This guards the disconnect-then-remove sequence in DestroySite /
+// rollbackPartialCreate.
+func TestIntegrationNetworkRemovalWithAttachedEndpoint(t *testing.T) {
+	e := newDockerEngine(t)
+	ctx := context.Background()
+
+	net := "apod-site-netleak-test"
+	stand := "apod-netleak-endpoint" // stands in for the Traefik container
+
+	if err := e.docker.EnsureNetwork(ctx, net); err != nil {
+		t.Fatalf("ensure network: %v", err)
+	}
+	if err := e.docker.PullImage(ctx, itImage); err != nil {
+		t.Fatalf("pull image: %v", err)
+	}
+	id, err := e.docker.CreateContainer(ctx, ContainerConfig{
+		Name:   stand,
+		Image:  itImage,
+		Args:   []string{"sleep", "3600"},
+		Labels: map[string]string{labelPrefix + "managed": "true"},
+	})
+	if err != nil {
+		t.Fatalf("create endpoint container: %v", err)
+	}
+	t.Cleanup(func() {
+		e.docker.StopContainer(ctx, id)
+		e.docker.RemoveContainer(ctx, id)
+		e.docker.DisconnectNetwork(ctx, net, id)
+		e.docker.RemoveNetwork(ctx, net)
+	})
+	// The endpoint must be ACTIVE (the container running) to block removal —
+	// exactly Traefik's state when a live site is destroyed.
+	if err := e.docker.StartContainer(ctx, id); err != nil {
+		t.Fatalf("start endpoint container: %v", err)
+	}
+	if err := e.docker.ConnectNetwork(ctx, net, id); err != nil {
+		t.Fatalf("attach endpoint to network: %v", err)
+	}
+
+	// With a running endpoint still attached, a bare removal MUST fail — this is
+	// the exact condition that made site destroy leak networks.
+	if err := e.docker.RemoveNetwork(ctx, net); err == nil {
+		t.Fatal("expected RemoveNetwork to fail while an active endpoint is attached")
+	}
+
+	// Disconnect first (as DestroySite now does), then removal must succeed.
+	if err := e.docker.DisconnectNetwork(ctx, net, id); err != nil {
+		t.Fatalf("disconnect endpoint: %v", err)
+	}
+	if err := e.docker.RemoveNetwork(ctx, net); err != nil {
+		t.Fatalf("RemoveNetwork after disconnect should succeed: %v", err)
+	}
+	if exists, _ := e.docker.NetworkExists(ctx, net); exists {
+		t.Error("network should be gone after disconnect + remove")
+	}
+}

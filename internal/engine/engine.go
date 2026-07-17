@@ -443,7 +443,7 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		return fmt.Errorf("ensure site network: %w", err)
 	}
 	// Connect Traefik to this site's network so it can route traffic
-	e.docker.ConnectNetwork(ctx, siteNetwork, "apod-traefik")
+	e.docker.ConnectNetwork(ctx, siteNetwork, traefikContainerName)
 
 	memoryMB := parseMemoryMB(site.RAM)
 	cpus, _ := strconv.ParseFloat(site.CPU, 64)
@@ -639,7 +639,12 @@ func (e *Engine) rollbackPartialCreate(domain, owner string) {
 		e.docker.StopContainer(ctx, id)
 		e.docker.RemoveContainer(ctx, id)
 	}
-	e.docker.RemoveNetwork(ctx, fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-")))
+	// Detach Traefik before removing the network — if create got far enough to
+	// attach it, Docker won't remove a network with an active endpoint and it
+	// would leak.
+	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
+	e.docker.DisconnectNetwork(ctx, siteNetwork, traefikContainerName)
+	e.docker.RemoveNetwork(ctx, siteNetwork)
 	siteRoot, dataRoot := e.SiteDir(owner, domain)
 	os.RemoveAll(siteRoot)
 	os.RemoveAll(dataRoot)
@@ -803,8 +808,12 @@ func (e *Engine) DestroySite(ctx context.Context, domain string, purge bool) (er
 		return fmt.Errorf("delete site record: %w", err)
 	}
 
-	// Remove site-specific network
+	// Remove site-specific network. Traefik was attached to it at create time so
+	// it could route to the backend; Docker refuses to remove a network with an
+	// active endpoint, so detach Traefik first or the network leaks on every
+	// destroy (a stale endpoint accumulating on Traefik forever).
 	siteNetwork := fmt.Sprintf("apod-site-%s", strings.ReplaceAll(domain, ".", "-"))
+	e.docker.DisconnectNetwork(ctx, siteNetwork, traefikContainerName)
 	e.docker.RemoveNetwork(ctx, siteNetwork)
 
 	// Remove the site's IP allowlist middleware and alias-router files.
