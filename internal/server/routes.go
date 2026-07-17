@@ -470,7 +470,7 @@ func (h *Handler) SaveDriverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.SaveDriver(req.Name, req.YAML); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "saved", "name": req.Name})
@@ -492,7 +492,7 @@ func (h *Handler) ValidateDriverHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	preview, err := h.engine.ValidateDriver(req.YAML)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, preview)
@@ -501,7 +501,7 @@ func (h *Handler) ValidateDriverHandler(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) DeleteDriverHandler(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	if err := h.engine.DeleteDriver(name); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1427,7 +1427,7 @@ func (h *Handler) ScaleProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.engine.ScaleProcess(r.Context(), domain, service, req.Replicas); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{"status": "scaled", "service": service, "replicas": req.Replicas})
@@ -1440,7 +1440,7 @@ func (h *Handler) RestartProcessHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	service := chi.URLParam(r, "service")
 	if err := h.engine.RestartProcess(r.Context(), domain, service); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "restarted", "service": service})
@@ -1457,7 +1457,7 @@ func (h *Handler) AllowIPHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.AllowIP(r.Context(), domain, req.IP); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "allowed", "ip": req.IP})
@@ -1619,7 +1619,7 @@ func (h *Handler) FirewallAllowFromHandler(w http.ResponseWriter, r *http.Reques
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.FirewallAllowFrom(r.Context(), req.Source, req.Port, req.Proto); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "allowed", "source": req.Source})
@@ -1631,7 +1631,7 @@ func (h *Handler) FirewallDeleteHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if err := h.engine.FirewallDelete(r.Context(), req.Num); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondEngineError(w, err)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})

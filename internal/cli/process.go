@@ -57,6 +57,9 @@ var processScaleCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("replicas must be an integer")
 		}
+		if n < 0 {
+			return fmt.Errorf("replicas must be zero or greater")
+		}
 		client := NewClient(flagRemote, flagKey)
 		if _, err := client.Post(fmt.Sprintf("/api/v1/sites/%s/processes/%s/scale", args[0], args[1]), map[string]int{"replicas": n}); err != nil {
 			return err

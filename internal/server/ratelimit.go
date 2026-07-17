@@ -65,9 +65,13 @@ func clientIP(r *http.Request) string {
 	if ip == "" {
 		ip = r.RemoteAddr
 	}
-	// Honor X-Forwarded-For when the peer is a trusted proxy, or when the
-	// request came through the bundled web proxy over the local socket.
-	if isTrustedProxy(ip) || isProxiedWeb(r) {
+	// Honor X-Forwarded-For when the peer is a trusted proxy, or when the request
+	// genuinely came through the bundled web proxy over the LOCAL socket. The
+	// socket check is essential: X-Apod-Proxied is a plain header, so without it
+	// a TCP client could set it plus a rotating X-Forwarded-For to mint a fresh
+	// rate-limit key per request and defeat the brute-force limits.
+	isUnix, _ := r.Context().Value(ctxIsUnixSocket).(bool)
+	if isTrustedProxy(ip) || (isUnix && isProxiedWeb(r)) {
 		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 			parts := strings.Split(forwarded, ",")
 			candidate := strings.TrimSpace(parts[len(parts)-1])

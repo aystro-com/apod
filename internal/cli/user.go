@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -133,10 +135,11 @@ The password can be passed with --password or piped on stdin:
 
 		password, _ := cmd.Flags().GetString("password")
 		if password == "" {
-			// Read a single line from stdin (supports piping).
-			var line string
-			fmt.Fscanln(os.Stdin, &line)
-			password = line
+			// Read the whole first line from stdin (supports piping). Fscanln
+			// would stop at the first space, silently truncating a passphrase
+			// like "correct horse battery staple" to "correct".
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			password = strings.TrimRight(line, "\r\n")
 		}
 		if password == "" {
 			return fmt.Errorf("no password given: use --password or pipe it on stdin")

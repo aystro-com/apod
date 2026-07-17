@@ -43,7 +43,7 @@ var configGetCmd = &cobra.Command{
 }
 
 var configSetCmd = &cobra.Command{
-	Use:   "set [domain] --key [key] --value [value]",
+	Use:   "set [domain] --set-key [key] --set-value [value]",
 	Short: "Set a config value",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
