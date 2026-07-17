@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -74,8 +75,49 @@ func (e *Engine) CheckForUpdate(ctx context.Context) (string, bool, error) {
 		latest = latest[1:]
 	}
 
-	hasUpdate := latest != Version
+	// Only advertise an update when the release is strictly newer than what's
+	// running. A raw `latest != Version` reported an update on every "dev" build
+	// and couldn't tell a newer pre-release from an older stable.
+	hasUpdate := versionIsNewer(latest, Version)
 	return latest, hasUpdate, nil
+}
+
+// versionIsNewer reports whether release version `latest` is strictly newer than
+// `current`, comparing dotted numeric cores (major.minor.patch). A non-numeric
+// current (e.g. the "dev" default) or unparseable input returns false, so a dev
+// build never claims an update and a self-update never silently downgrades.
+func versionIsNewer(latest, current string) bool {
+	lc, lok := parseVersionCore(latest)
+	cc, cok := parseVersionCore(current)
+	if !lok || !cok {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		if lc[i] != cc[i] {
+			return lc[i] > cc[i]
+		}
+	}
+	return false
+}
+
+func parseVersionCore(v string) ([3]int, bool) {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i] // drop pre-release / build metadata
+	}
+	var out [3]int
+	parts := strings.Split(v, ".")
+	if parts[0] == "" {
+		return out, false
+	}
+	for i := 0; i < len(parts) && i < 3; i++ {
+		n, err := strconv.Atoi(parts[i])
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 // fetchLatestRelease tries stable release first, falls back to pre-releases
@@ -119,6 +161,14 @@ func (e *Engine) SelfUpdate(ctx context.Context) error {
 	release, err := fetchLatestRelease()
 	if err != nil {
 		return err
+	}
+
+	// Never silently install an OLDER binary than the one running (a host on a
+	// newer pre-release than the latest stable would otherwise be downgraded).
+	// Same-version reinstall and dev→release are still allowed.
+	relVer := strings.TrimPrefix(release.TagName, "v")
+	if versionIsNewer(Version, relVer) {
+		return Invalid("refusing to downgrade: running %s, latest release is %s", Version, relVer)
 	}
 
 	// Find tarball for current OS/arch (goreleaser format: apod_linux_amd64.tar.gz)

@@ -30,10 +30,15 @@ func (e *Engine) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	// Disk usage for data dir
 	var stat unix.Statfs_t
 	if err := unix.Statfs(e.dataDir, &stat); err == nil {
-		stats.DiskTotalGB = stat.Blocks * uint64(stat.Bsize) / 1024 / 1024 / 1024
-		stats.DiskUsedGB = (stat.Blocks - stat.Bfree) * uint64(stat.Bsize) / 1024 / 1024 / 1024
-		if stats.DiskTotalGB > 0 {
-			stats.DiskPercent = float64(stats.DiskUsedGB) / float64(stats.DiskTotalGB) * 100
+		totalBytes := stat.Blocks * uint64(stat.Bsize)
+		usedBytes := (stat.Blocks - stat.Bfree) * uint64(stat.Bsize)
+		stats.DiskTotalGB = totalBytes / 1024 / 1024 / 1024
+		stats.DiskUsedGB = usedBytes / 1024 / 1024 / 1024
+		// Derive the percentage from raw bytes, not the GB-truncated integers —
+		// otherwise the truncation loses up to ~1GB each side and reports 0% for
+		// any volume under 1GB total.
+		if totalBytes > 0 {
+			stats.DiskPercent = float64(usedBytes) / float64(totalBytes) * 100
 		}
 	}
 

@@ -139,7 +139,20 @@ func (e *Engine) containerStats(ctx context.Context, id string) (cpuPercent, mem
 	if had {
 		cpuPercent = cpuPercentFromDelta(prev, cur)
 	}
-	memMB = float64(ds.MemoryStats.Usage) / 1024 / 1024
+	// Subtract reclaimable page cache the same way `docker stats` does, so the
+	// reported figure is the container's actual working set. Raw cgroup Usage
+	// counts file cache and reads 2-3x high, which drove false near-limit
+	// readings and bad scaling signals. inactive_file is the cgroup v2 key;
+	// total_inactive_file the v1 key.
+	usage := ds.MemoryStats.Usage
+	cache := ds.MemoryStats.Stats["inactive_file"]
+	if cache == 0 {
+		cache = ds.MemoryStats.Stats["total_inactive_file"]
+	}
+	if cache < usage {
+		usage -= cache
+	}
+	memMB = float64(usage) / 1024 / 1024
 	return cpuPercent, memMB, true
 }
 

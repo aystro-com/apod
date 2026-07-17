@@ -328,6 +328,11 @@ func (e *Engine) DisableUptime(ctx context.Context, domain string) error {
 	if err := e.db.DeleteUptimeCheck(domain); err != nil {
 		return err
 	}
+	// Also drop the accumulated poll history — otherwise disabling a check leaks
+	// its uptime_logs rows (thousands/day) forever with no check left to own them.
+	if err := e.db.DeleteUptimeLogs(domain); err != nil {
+		log.Printf("uptime disable %s: prune logs: %v", domain, err)
+	}
 	if e.uptimeChecker != nil {
 		e.uptimeChecker.stopCheck(domain)
 	}

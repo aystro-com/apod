@@ -83,6 +83,14 @@ func (d *DB) DeleteUptimeCheck(domain string) error {
 	return err
 }
 
+// DeleteUptimeLogs removes a domain's accumulated poll history. Called when a
+// check is disabled (or a site destroyed) so uptime_logs — which grows by ~2880
+// rows/day/site at the 30s floor — doesn't leak forever after the check is gone.
+func (d *DB) DeleteUptimeLogs(domain string) error {
+	_, err := d.conn.Exec(`DELETE FROM uptime_logs WHERE site_domain = ?`, domain)
+	return err
+}
+
 func (d *DB) LogUptimeResult(domain string, statusCode, responseMs int, isUp bool) error {
 	up := 0
 	if isUp {
@@ -116,7 +124,7 @@ func (d *DB) GetUptimeStats(domain string, hours int) (*UptimeStats, error) {
 func (d *DB) GetUptimeLogs(domain string, limit int) ([]UptimeLog, error) {
 	rows, err := d.conn.Query(
 		`SELECT id, site_domain, status_code, response_ms, is_up, checked_at FROM uptime_logs WHERE site_domain = ? ORDER BY checked_at DESC LIMIT ?`,
-		domain, limit,
+		domain, clampLimit(limit),
 	)
 	if err != nil {
 		return nil, err

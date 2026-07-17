@@ -36,7 +36,7 @@ func (d *DB) DeleteOperations(siteDomain string) error {
 
 func (d *DB) ListOperations(siteDomain string, limit int) ([]Operation, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, site_domain, action, details, result, created_at FROM operations WHERE site_domain = ? ORDER BY created_at DESC LIMIT ?`, siteDomain, limit,
+		`SELECT id, site_domain, action, details, result, created_at FROM operations WHERE site_domain = ? ORDER BY created_at DESC LIMIT ?`, siteDomain, clampLimit(limit),
 	)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func (d *DB) ListOperations(siteDomain string, limit int) ([]Operation, error) {
 
 func (d *DB) ListAllOperations(limit int) ([]Operation, error) {
 	rows, err := d.conn.Query(
-		`SELECT id, site_domain, action, details, result, created_at FROM operations ORDER BY created_at DESC LIMIT ?`, limit,
+		`SELECT id, site_domain, action, details, result, created_at FROM operations ORDER BY created_at DESC LIMIT ?`, clampLimit(limit),
 	)
 	return scanOperations(rows, err)
 }
@@ -67,7 +67,7 @@ func (d *DB) ListOperationsByOwner(owner string, limit int) ([]Operation, error)
 	rows, err := d.conn.Query(
 		`SELECT o.id, o.site_domain, o.action, o.details, o.result, o.created_at
 		   FROM operations o JOIN sites s ON s.domain = o.site_domain
-		  WHERE s.owner = ? ORDER BY o.created_at DESC LIMIT ?`, owner, limit,
+		  WHERE s.owner = ? ORDER BY o.created_at DESC LIMIT ?`, owner, clampLimit(limit),
 	)
 	return scanOperations(rows, err)
 }

@@ -64,6 +64,24 @@ func (d *DB) Close() error {
 	return d.conn.Close()
 }
 
+// clampLimit bounds a caller-supplied row limit to a sane positive range. SQLite
+// treats a negative LIMIT as unlimited, so an unclamped negative (or huge) value
+// would turn a paginated query into a full-table scan. Zero/negative falls back
+// to a default page; anything above the cap is capped.
+func clampLimit(limit int) int {
+	const (
+		defaultLimit = 1000
+		maxLimit     = 5000
+	)
+	if limit <= 0 {
+		return defaultLimit
+	}
+	if limit > maxLimit {
+		return maxLimit
+	}
+	return limit
+}
+
 func (d *DB) Conn() *sql.DB {
 	return d.conn
 }
