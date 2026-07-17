@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -72,13 +71,13 @@ func (e *Engine) AddProxyRule(ctx context.Context, domain, ruleType string, conf
 		}
 	}
 
-	configJSON, _ := json.Marshal(config)
-	id, err := e.db.CreateProxyRule(domain, ruleType, string(configJSON))
-	if err != nil {
-		return 0, err
-	}
-	e.LogActivity(domain, "proxy_add", ruleType, "success")
-	return id, nil
+	// Fail closed: proxy rules are persisted but NOTHING materializes them into
+	// the router — no Traefik middleware is ever generated from proxy_rules. That
+	// makes basic-auth in particular a dangerous false sense of protection (the
+	// site stays fully public), and redirect/header silently do nothing. Rather
+	// than accept a rule that will never take effect, refuse it until the feature
+	// is actually wired to Traefik and verified against a live router.
+	return 0, Invalid("proxy rules (%s) are not currently enforced by the router and have been disabled to avoid a false sense of configuration", ruleType)
 }
 
 func (e *Engine) ListProxyRules(ctx context.Context, domain string) (interface{}, error) {

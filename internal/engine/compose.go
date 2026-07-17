@@ -731,9 +731,13 @@ func (e *Engine) CreateComposeSite(ctx context.Context, opts CreateSiteOpts, dri
 	}
 
 	e.emitProgress(opts.Domain, "Configuring routing", "running", "", 85)
-	// Connect Traefik to the compose network
+	// Connect Traefik to the compose network. A failed attach means Traefik
+	// can't reach the backend, so surface it instead of discarding it and
+	// serving a silent 502.
 	composeNetwork := project + "_default"
-	e.docker.ConnectNetwork(ctx, composeNetwork, "apod-traefik")
+	if err := e.docker.ConnectNetwork(ctx, composeNetwork, "apod-traefik"); err != nil {
+		log.Printf("compose site %s: connect traefik to %s: %v", opts.Domain, composeNetwork, err)
+	}
 
 	// Write Traefik routing config
 	if proxyService != "" && proxyPort != "" {

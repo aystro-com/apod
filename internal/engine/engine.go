@@ -231,6 +231,22 @@ func (e *Engine) CreateSite(ctx context.Context, opts CreateSiteOpts) (err error
 		return Conflict("domain %q is already in use by site %q", opts.Domain, existing.Domain)
 	}
 
+	// Reject a domain whose Docker/Traefik identifier collides with an existing
+	// site. The compose project name, site network, router and IP-allow
+	// middleware are all derived as domain-with-dots-as-dashes, so two DIFFERENT
+	// registerable domains (e.g. "a.b.com" and "a-b.com") map to the same id —
+	// and one tenant's `compose down -v` would then delete the other's containers
+	// and volumes. Blocking the collision at create keeps existing sites' derived
+	// resources unambiguous without a risky rename of live infrastructure.
+	newID := strings.ReplaceAll(opts.Domain, ".", "-")
+	if sites, err := e.db.ListSites(); err == nil {
+		for _, s := range sites {
+			if s.Domain != opts.Domain && strings.ReplaceAll(s.Domain, ".", "-") == newID {
+				return Conflict("domain %q collides with existing site %q (both map to internal id %q); choose a different domain", opts.Domain, s.Domain, newID)
+			}
+		}
+	}
+
 	if err := e.db.CreateSite(site); err != nil {
 		// If domain exists from a failed previous create, clean it up and retry
 		if existing, _ := e.db.GetSite(opts.Domain); existing != nil {
